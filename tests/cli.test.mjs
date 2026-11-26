@@ -272,3 +272,33 @@ test('parseArgv rejects an invalid fail-on value', () => {
 test('parseArgv rejects a missing option value', () => {
   assert.throws(() => parseArgv(['scan', '--format']), UsageError);
 });
+
+test('a config plugin that escapes its directory is a usage error', async (t) => {
+  const root = await makeTree(t, {
+    'project/.sentinelrc.json': '{"plugins": ["../outside.mjs"]}\n',
+    'outside.mjs': 'export default {};\n',
+  });
+  const result = await runCli(['scan', 'project'], root);
+  assert.equal(result.code, EXIT_CODES.usage);
+  assert.match(result.stderr, /escapes the config directory/);
+});
+
+test('--plugin accepts a path outside the config directory', async (t) => {
+  const root = await makeTree(t, { 'project/keep.txt': 'x\n' });
+  const plugin = `import { defineRule } from ${JSON.stringify(API_URL)};
+export default defineRule({
+  id: 'plugin/outside',
+  title: 'Outside plugin rule',
+  severity: 'warning',
+  appliesTo: ['**/*.txt'],
+  check: () => [{ line: 1, column: 1, message: 'outside plugin finding' }],
+});
+`;
+  await writeFile(path.join(root, 'outside-rule.mjs'), plugin, 'utf8');
+  const result = await runCli(
+    ['scan', 'project', '--plugin', path.join(root, 'outside-rule.mjs')],
+    root,
+  );
+  assert.equal(result.code, EXIT_CODES.findings);
+  assert.match(result.stdout, /plugin\/outside/);
+});

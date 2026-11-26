@@ -358,6 +358,9 @@ const insecureRemoteUrl = defineRule({
       for (const arg of arrayStrings(argsEntry === null ? null : argsEntry.value)) {
         if (arg.value === null) continue;
         for (const url of collectInsecureUrls(arg.value)) {
+          // The collector also returns https URLs so the same argument can
+          // be reported once; only plaintext HTTP is unsafe here.
+          if (!/^http:\/\//i.test(url)) continue;
           candidates.push({ line: arg.node.line, column: arg.node.column, value: url });
         }
       }

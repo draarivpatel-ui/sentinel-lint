@@ -22,7 +22,7 @@ way.
 ```bash
 git clone <your fork>
 cd sentinel-lint
-node --test tests/                 # 327 tests, no install step
+node --test tests/                 # 359 tests, no install step
 node bin/sentinel-lint.mjs scan .  # self scan must stay clean
 ```
 

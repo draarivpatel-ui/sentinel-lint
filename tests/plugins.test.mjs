@@ -75,3 +75,30 @@ test('a directory cannot be loaded as a plugin', async (t) => {
   await writeTree(root, { 'folder/rule.mjs': 'export const x = 1;\n' });
   await assert.rejects(() => loadPluginRules(['folder'], root), /not a file/);
 });
+
+test('a config plugin cannot escape the config directory', async (t) => {
+  const root = await makeTempDir(t);
+  await writeTree(root, {
+    'outside.mjs': pluginSource(`export default defineRule(${ruleLiteral('plugin/out')});`),
+    'config/keep.txt': '',
+  });
+  await assert.rejects(
+    () => loadPluginRules(['../outside.mjs'], `${root}/config`),
+    /escapes the config directory/,
+  );
+});
+
+test('an explicitly allowed plugin may sit outside the config directory', async (t) => {
+  const root = await makeTempDir(t);
+  await writeTree(root, {
+    'outside.mjs': pluginSource(`export default defineRule(${ruleLiteral('plugin/out')});`),
+    'config/keep.txt': '',
+  });
+  const rules = await loadPluginRules(['../outside.mjs'], `${root}/config`, {
+    allowOutsideConfigDir: true,
+  });
+  assert.deepEqual(
+    rules.map((rule) => rule.id),
+    ['plugin/out'],
+  );
+});

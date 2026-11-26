@@ -33,14 +33,23 @@ const SECURITY_SEVERITY = Object.freeze({
 /**
  * Encode a repository relative path as an artifact URI.
  * Spaces become %20 and backslashes become forward slashes.
+ *
+ * The result is always relative: a drive letter, a leading slash and any
+ * parent directory segments are removed, so a malformed or hostile finding
+ * cannot publish an absolute host path into a SARIF log that gets attached
+ * to a code scanning alert.
  * @param {string} filePath
  * @returns {string}
  */
 export function artifactUri(filePath) {
-  return String(filePath)
+  const normalized = String(filePath)
     .replace(/\\/g, '/')
+    .replace(/^[A-Za-z]:/, '')
+    .replace(/^\/+/, '');
+  return normalized
     .split('/')
-    .map((segment) => encodeURIComponent(segment).replace(/%2F/gi, '/'))
+    .filter((segment) => segment !== '' && segment !== '.' && segment !== '..')
+    .map((segment) => encodeURIComponent(segment))
     .join('/');
 }
 

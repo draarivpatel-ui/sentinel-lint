@@ -28,6 +28,15 @@ function paint(enabled, code, text) {
   return enabled ? `${code}${text}${ANSI.reset}` : text;
 }
 
+/**
+ * Neutralize control characters in text that came from a scanned repository.
+ * A file name or manifest key can carry ANSI escapes, carriage returns or
+ * other terminal control sequences, and the reporter must not execute them.
+ */
+function clean(text) {
+  return String(text ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
+}
+
 function plural(count, singular, pluralForm) {
   return count === 1 ? singular : pluralForm ?? `${singular}s`;
 }
@@ -65,7 +74,7 @@ export function formatTerminal(result, options = {}) {
 
   if (!quiet) {
     out.push(paint(color, ANSI.bold, `sentinel-lint ${version}`));
-    out.push(paint(color, ANSI.gray, `scan root ${result.root}`));
+    out.push(paint(color, ANSI.gray, `scan root ${clean(result.root)}`));
     out.push('');
   }
 
@@ -77,7 +86,7 @@ export function formatTerminal(result, options = {}) {
     if (finding.file !== currentFile) {
       if (currentFile !== null) out.push('');
       currentFile = finding.file;
-      out.push(paint(color, ANSI.bold, currentFile ?? '(repository)'));
+      out.push(paint(color, ANSI.bold, clean(currentFile ?? '(repository)')));
     }
     const position = `${finding.line}:${finding.column}`.padEnd(9);
     const severity = finding.severity.toUpperCase().padEnd(8);
@@ -86,9 +95,9 @@ export function formatTerminal(result, options = {}) {
       paint(color, SEVERITY_COLOR[finding.severity] ?? ANSI.yellow, severity),
       paint(color, ANSI.dim, finding.ruleId),
     ].join(' ');
-    out.push(`  ${head}  ${finding.message}`);
+    out.push(`  ${head}  ${clean(finding.message)}`);
     if (finding.fix !== null) {
-      out.push(`  ${' '.repeat(9)} ${paint(color, ANSI.gray, `fix: ${finding.fix}`)}`);
+      out.push(`  ${' '.repeat(9)} ${paint(color, ANSI.gray, `fix: ${clean(finding.fix)}`)}`);
     }
     printed += 1;
   }
@@ -127,7 +136,13 @@ export function formatTerminal(result, options = {}) {
     out.push(paint(color, ANSI.gray, `${result.diagnostics.length} ${plural(result.diagnostics.length, 'diagnostic')}`));
     if (!quiet) {
       for (const diagnostic of result.diagnostics.slice(0, 10)) {
-        out.push(paint(color, ANSI.gray, `  ${diagnostic.code}: ${diagnostic.message}`));
+        out.push(
+          paint(
+            color,
+            ANSI.gray,
+            `  ${clean(diagnostic.code)}: ${clean(diagnostic.message)}`,
+          ),
+        );
       }
       if (result.diagnostics.length > 10) {
         out.push(paint(color, ANSI.gray, `  ... ${result.diagnostics.length - 10} more`));

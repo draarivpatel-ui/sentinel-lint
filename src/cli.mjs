@@ -248,9 +248,19 @@ function summarize(result) {
 async function loadRulesForScan(configResult, cliPlugins) {
   const builtin = loadBuiltinRules();
   const configured = Array.isArray(configResult.config.plugins) ? configResult.config.plugins : [];
-  const pluginPaths = [...configured, ...cliPlugins];
-  if (pluginPaths.length === 0) return [...builtin];
-  const pluginRules = await loadPluginRules(pluginPaths, configResult.configDir);
+  const pluginRules = [];
+  if (configured.length > 0) {
+    // Config sourced paths are untrusted when the config came from a
+    // scanned repository, so they must stay inside the config directory.
+    pluginRules.push(...(await loadPluginRules(configured, configResult.configDir)));
+  }
+  if (cliPlugins.length > 0) {
+    // The operator named these paths on the command line, so absolute
+    // paths and parent directories are allowed.
+    pluginRules.push(
+      ...(await loadPluginRules(cliPlugins, configResult.configDir, { allowOutsideConfigDir: true })),
+    );
+  }
   return [...builtin, ...pluginRules];
 }
 

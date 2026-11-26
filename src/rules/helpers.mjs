@@ -15,16 +15,31 @@ const MCP_BASENAMES = new Set([
   'mcp_servers.json',
 ]);
 
+const MCP_SNIFF_CACHE = new WeakMap();
+
 /**
  * True for files that look like an MCP or Claude Desktop manifest.
  * Extension plus content sniff keeps renamed manifests discoverable without
- * treating every JSON file as an MCP config.
+ * treating every JSON file as an MCP config. An escaped key such as
+ * "mcpServers" is decoded before the sniff so it cannot hide a renamed
+ * manifest from every MCP rule.
  */
 export function isMcpConfigFile(file) {
+  if (file === null || typeof file !== 'object') return false;
   const name = (file.name ?? '').toLowerCase();
   if (MCP_BASENAMES.has(name)) return true;
   if (!name.endsWith('.json')) return false;
-  return file.text.includes('"mcpServers"');
+  if (MCP_SNIFF_CACHE.has(file)) return MCP_SNIFF_CACHE.get(file);
+  const text = String(file.text ?? '');
+  let matched = text.includes('"mcpServers"');
+  if (!matched && text.includes('\\u')) {
+    const decoded = text.replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    );
+    matched = decoded.includes('"mcpServers"');
+  }
+  MCP_SNIFF_CACHE.set(file, matched);
+  return matched;
 }
 
 /**

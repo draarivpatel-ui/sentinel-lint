@@ -39,9 +39,21 @@ function collectExports(moduleNamespace) {
  *
  * @param {string[]} pluginPaths Paths from the config file, relative to configDir.
  * @param {string} configDir Absolute directory used to resolve relative paths.
+ * @param {object} [options]
+ * @param {boolean} [options.allowOutsideConfigDir] Permit paths outside the
+ *   config directory. Only the CLI sets this, because the operator named the
+ *   file directly. Config sourced paths must stay inside the config tree.
  * @returns {Promise<object[]>}
  */
-export async function loadPluginRules(pluginPaths, configDir) {
+export async function loadPluginRules(pluginPaths, configDir, options = {}) {
+  const allowOutside = options.allowOutsideConfigDir === true;
+  let realConfigDir;
+  try {
+    realConfigDir = await fs.realpath(configDir);
+  } catch {
+    realConfigDir = path.resolve(configDir);
+  }
+
   const rules = [];
   for (const pluginPath of pluginPaths) {
     const absolute = path.resolve(configDir, pluginPath);
@@ -53,7 +65,21 @@ export async function loadPluginRules(pluginPaths, configDir) {
     }
     if (!stat.isFile()) throw new PluginError(`plugin path is not a file: ${pluginPath}`);
 
-    const url = pathToFileURL(absolute);
+    // realpath defeats a symlink that points outside the config tree.
+    let realPlugin;
+    try {
+      realPlugin = await fs.realpath(absolute);
+    } catch {
+      throw new PluginError(`plugin not found: ${pluginPath}`);
+    }
+    if (!allowOutside) {
+      const relative = path.relative(realConfigDir, realPlugin);
+      if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new PluginError(`plugin path escapes the config directory: ${pluginPath}`);
+      }
+    }
+
+    const url = pathToFileURL(realPlugin);
     url.searchParams.set('sentinel', String(stat.mtimeMs));
 
     let namespace;

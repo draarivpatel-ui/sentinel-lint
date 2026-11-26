@@ -288,3 +288,12 @@ test('mcp/invalid-config accepts JSONC manifests', async (t) => {
   });
   assert.equal(byRule(result, 'mcp/invalid-config').length, 0);
 });
+
+test('mcp/insecure-remote-url allows a TLS endpoint in arguments', async (t) => {
+  const result = await scanTree(
+    t,
+    manifest(`      "command": "node",
+      "args": ["server.js", "--url", "https://internal.example.com"]`),
+  );
+  assert.equal(byRule(result, 'mcp/insecure-remote-url').length, 0);
+});

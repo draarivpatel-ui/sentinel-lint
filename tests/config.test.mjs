@@ -135,3 +135,17 @@ test('loadConfig keeps valid keys and reports an unknown one', async (t) => {
   assert.deepEqual(result.config.exclude, ['src/**']);
   assert.equal(result.warnings.length, 1);
 });
+
+test('a __proto__ key cannot pollute the prototype', () => {
+  const raw = JSON.parse('{"__proto__": {"polluted": true}, "failOn": "warning"}');
+  const { config, warnings } = validateConfig(raw);
+  assert.equal({}.polluted, undefined);
+  assert.equal(Object.getPrototypeOf(config), Object.prototype);
+  assert.equal(warnings.length, 1);
+});
+
+test('rules cannot be assigned through __proto__', () => {
+  const raw = JSON.parse('{"rules": {"__proto__": {"polluted": true}}}');
+  assert.throws(() => validateConfig(raw), ConfigError);
+  assert.equal({}.polluted, undefined);
+});

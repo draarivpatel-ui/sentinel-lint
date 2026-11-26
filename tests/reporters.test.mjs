@@ -181,3 +181,29 @@ test('supportsColor respects the terminal and the environment', () => {
   assert.equal(supportsColor({ isTTY: true }, { NO_COLOR: '1' }), false);
   assert.equal(supportsColor({ isTTY: false }, { FORCE_COLOR: '1' }), true);
 });
+
+test('artifact URIs never carry an absolute host path', () => {
+  assert.equal(artifactUri('/etc/passwd'), 'etc/passwd');
+  assert.equal(artifactUri('C:\\Users\\name\\secret.txt'), 'Users/name/secret.txt');
+  assert.equal(artifactUri('../../etc/passwd'), 'etc/passwd');
+  assert.equal(artifactUri('./src/app.js'), 'src/app.js');
+  assert.equal(artifactUri('src//app.js'), 'src/app.js');
+});
+
+test('terminal output neutralizes control characters from scanned content', () => {
+  const result = makeResult({
+    findings: [
+      makeFinding({
+        file: 'evil\u001b[31m.js',
+        message: 'payload \u001b]52;c;ZXZpbA==\u0007 here',
+        fix: 'do\u000dnot',
+      }),
+    ],
+    diagnostics: [{ code: 'bad\u001b[2J', message: 'diag\u0007' }],
+  });
+  const text = formatTerminal(result);
+  assert.equal(text.includes('\u001b'), false);
+  assert.equal(text.includes('\u0007'), false);
+  assert.equal(text.includes('\u000d'), false);
+  assert.match(text, /evil/);
+});

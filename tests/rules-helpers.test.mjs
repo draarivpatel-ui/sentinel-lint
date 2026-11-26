@@ -14,6 +14,7 @@ import {
 } from '../src/rules/helpers.mjs';
 import {
   collectRunBlocks,
+  hasPullRequestTarget,
   isPinnedActionRef,
   isUntrustedExpression,
   parseUses,
@@ -34,6 +35,7 @@ test('isMcpConfigFile recognises the documented manifest names', () => {
 test('isMcpConfigFile sniffs renamed manifests by content', () => {
   assert.equal(isMcpConfigFile(fileOf('tooling.json', '{ "mcpServers": {} }')), true);
   assert.equal(isMcpConfigFile(fileOf('tooling.json', '{ "name": "x" }')), false);
+  assert.equal(isMcpConfigFile(fileOf('tooling.json', '{ "\\u006dcpServers": {} }')), true);
 });
 
 test('isMcpConfigFile ignores other extensions', () => {
@@ -271,4 +273,63 @@ test('readCallArgument respects parentheses inside strings', () => {
 test('readCallArgument stops at an unbalanced call', () => {
   const text = 'exec("open"';
   assert.equal(readCallArgument(text, 4), '"open"');
+});
+
+test('collectRunBlocks accepts whitespace before the run colon', () => {
+  assert.deepEqual(collectRunBlocks(['    run : echo hi']), [{ startLine: 1, endLine: 1 }]);
+});
+
+test('collectRunBlocks accepts quoted run keys', () => {
+  assert.deepEqual(collectRunBlocks(['      - "run": echo hi']), [{ startLine: 1, endLine: 1 }]);
+  assert.deepEqual(collectRunBlocks(["      - 'run': |", '          echo hi']), [
+    { startLine: 1, endLine: 2 },
+  ]);
+});
+
+test('collectRunBlocks reads a plain multiline run value', () => {
+  const lines = ['      - run:', '          echo one', '      - name: after'];
+  assert.deepEqual(collectRunBlocks(lines), [{ startLine: 1, endLine: 2 }]);
+});
+
+test('collectRunBlocks resolves an alias to an anchored block', () => {
+  const lines = ['x-run: &deploy |', '  echo hi', 'jobs:', '  steps:', '    - run: *deploy'];
+  assert.deepEqual(collectRunBlocks(lines), [{ startLine: 1, endLine: 2 }]);
+});
+
+test('collectRunBlocks resolves an alias to an inline anchored scalar', () => {
+  const lines = ['x-run: &deploy echo hi', 'jobs:', '  steps:', '    - run: *deploy'];
+  assert.deepEqual(collectRunBlocks(lines), [{ startLine: 1, endLine: 1 }]);
+});
+
+test('hasPullRequestTarget reads flow and commented list forms', () => {
+  assert.equal(hasPullRequestTarget(['on: {push: {}, pull_request_target: {}}']), true);
+  assert.equal(hasPullRequestTarget(['on:', '  - push', '  - pull_request_target # risky']), true);
+  assert.equal(hasPullRequestTarget(['on:', '  [push, pull_request_target]']), true);
+  assert.equal(hasPullRequestTarget(['on: pull_request']), false);
+  assert.equal(hasPullRequestTarget(['# on: pull_request_target']), false);
+});
+
+test('parseUses accepts whitespace before the colon and quoted keys', () => {
+  assert.deepEqual(parseUses('      - uses : owner/repo@v1'), { spec: 'owner/repo@v1', column: 16 });
+  assert.deepEqual(parseUses('      - "uses": owner/repo@v1'), {
+    spec: 'owner/repo@v1',
+    column: 17,
+  });
+  assert.deepEqual(parseUses("      - 'uses': 'owner/repo@v1'"), {
+    spec: 'owner/repo@v1',
+    column: 18,
+  });
+});
+
+test('hasPullRequestTarget reads a multiline flow collection', () => {
+  assert.equal(
+    hasPullRequestTarget(['on: {', '  push: {},', '  pull_request_target: {}', '}']),
+    true,
+  );
+  assert.equal(hasPullRequestTarget(['on: [', '  push,', '  pull_request_target', ']']), true);
+});
+
+test('collectRunBlocks keeps an anchored plain scalar that ends with a pipe', () => {
+  const lines = ['x-run: &deploy', '  echo ${{ github.head_ref }} &deploy |', 'jobs:', '  - run: *deploy'];
+  assert.deepEqual(collectRunBlocks(lines), [{ startLine: 2, endLine: 2 }]);
 });

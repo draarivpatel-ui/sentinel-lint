@@ -2,7 +2,7 @@
 
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows and MCP configurations. It ships **15 security rules**, a
-stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **327
+stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **359
 tests** that run on the Node.js built in test runner without installing a
 single package.
 
@@ -180,6 +180,11 @@ A plugin may default export one rule, an array of rules, or export a named
 file from an untrusted repository is exactly as dangerous as a `postinstall`
 script. Read plugin paths before scanning.
 
+Plugin paths declared in a config file must resolve inside the directory that
+holds that config, after symlinks are resolved, so a committed config cannot
+reach into an unrelated directory. Pass `--plugin` on the command line for a
+module stored elsewhere; paths named on the command line are not restricted.
+
 ## Programmatic API
 
 ```js
@@ -203,7 +208,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-node --test tests/        # 327 tests, no install step
+node --test tests/        # 359 tests, no install step
 node bin/sentinel-lint.mjs scan .   # self scan
 ```
 
