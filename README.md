@@ -2,7 +2,7 @@
 
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows and MCP configurations. It ships **15 security rules**, a
-stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **381
+stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **382
 tests** that run on the Node.js built in test runner without installing a
 single package.
 
@@ -263,7 +263,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-npm test                          # 381 tests, no install step
+npm test                          # 382 tests, no install step
 node bin/sentinel-lint.mjs scan .   # self scan
 ```
 

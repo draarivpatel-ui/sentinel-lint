@@ -24,6 +24,10 @@ function leadingIndent(line) {
   return match === null ? 0 : match[0].length;
 }
 
+function workflowLines(text) {
+  return String(text).split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+}
+
 function isCommentLine(line) {
   return /^\s*#/.test(line);
 }
@@ -218,7 +222,7 @@ const scriptInjection = defineRule({
   fix: 'Put the value in an env: variable and reference the shell variable ("$TITLE"), which the shell treats as data. Never place ${{ github.event... }} directly in run:.',
   appliesTo: WORKFLOW_GLOBS,
   check(ctx) {
-    const lines = ctx.text.split('\n');
+    const lines = workflowLines(ctx.text);
     const blocks = collectRunBlocks(lines);
     if (blocks.length === 0) return [];
 
@@ -285,7 +289,7 @@ const unpinnedAction = defineRule({
   appliesTo: WORKFLOW_GLOBS,
   check(ctx) {
     const findings = [];
-    const lines = ctx.text.split('\n');
+    const lines = workflowLines(ctx.text);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
       if (isCommentLine(line)) continue;
@@ -328,7 +332,7 @@ const writeAllPermissions = defineRule({
   appliesTo: WORKFLOW_GLOBS,
   check(ctx) {
     const findings = [];
-    const lines = ctx.text.split('\n');
+    const lines = workflowLines(ctx.text);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
       if (isCommentLine(line)) continue;
@@ -445,7 +449,7 @@ const pullRequestTargetCheckout = defineRule({
   fix: 'Use the pull_request trigger for code that needs to build the contribution, or split a privileged commenting job from an unprivileged build job that never uses secrets.',
   appliesTo: WORKFLOW_GLOBS,
   check(ctx) {
-    const lines = ctx.text.split('\n');
+    const lines = workflowLines(ctx.text);
     if (!hasPullRequestTarget(lines)) return [];
 
     const findings = [];

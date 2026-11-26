@@ -88,6 +88,13 @@ test('actions/script-injection applies to composite action metadata', async (t) 
   assert.equal(byRule(result, 'actions/script-injection').length, 1);
 });
 
+test('actions/script-injection handles CRLF workflow line endings', async (t) => {
+  const result = await scanTree(t, {
+    [WORKFLOW]: 'jobs:\r\n  b:\r\n    steps:\r\n      - run: echo ${{ github.head_ref }}\r\n',
+  });
+  assert.equal(byRule(result, 'actions/script-injection').length, 1);
+});
+
 test('actions/unpinned-action flags a mutable tag', async (t) => {
   const result = await scanTree(t, workflow(['jobs:', '  b:', '    steps:', '      - uses: tj-actions/changed-files@v40']));
   const findings = byRule(result, 'actions/unpinned-action');
