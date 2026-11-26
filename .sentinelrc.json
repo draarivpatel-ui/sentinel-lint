@@ -1,0 +1,8 @@
+{
+  "$schema": "./schemas/sentinelrc.schema.json",
+  "failOn": "warning",
+  "include": [],
+  "exclude": ["tests/**"],
+  "rules": {},
+  "plugins": []
+}

@@ -1,0 +1,56 @@
+{
+  "name": "sentinel-lint",
+  "version": "0.1.0",
+  "description": "Plugin-first, zero-dependency security policy linter and SARIF 2.1.0 scanner for repositories, GitHub Actions workflows and MCP configurations.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.18"
+  },
+  "bin": {
+    "sentinel-lint": "bin/sentinel-lint.mjs"
+  },
+  "main": "./src/index.mjs",
+  "types": "./types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "types",
+    "docs",
+    "schemas",
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test tests/",
+    "scan": "node bin/sentinel-lint.mjs scan .",
+    "self-scan": "node bin/sentinel-lint.mjs scan . --config .sentinelrc.json"
+  },
+  "keywords": [
+    "security",
+    "linter",
+    "sarif",
+    "sarif-2.1.0",
+    "static-analysis",
+    "mcp",
+    "model-context-protocol",
+    "github-actions",
+    "supply-chain",
+    "zero-dependencies",
+    "plugin-system",
+    "code-scanning"
+  ],
+  "dependencies": {},
+  "devDependencies": {},
+  "author": "sentinel-lint contributors",
+  "private": false
+}

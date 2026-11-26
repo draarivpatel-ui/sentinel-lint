@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/sentinel-lint/sentinel-lint/main/schemas/sentinelrc.schema.json",
+  "title": "sentinel-lint configuration",
+  "description": "Configuration for the .sentinelrc.json file read by sentinel-lint.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional link to this schema."
+    },
+    "failOn": {
+      "description": "Lowest severity that makes the CLI exit with code 1.",
+      "enum": ["info", "warning", "error", "critical", "off", "none"],
+      "default": "warning"
+    },
+    "include": {
+      "description": "When non-empty, only paths matching one of these globs are scanned.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    },
+    "exclude": {
+      "description": "Paths matching one of these globs are skipped.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    },
+    "rules": {
+      "description": "Per rule severity overrides. The value off disables the rule.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$" },
+      "additionalProperties": {
+        "enum": ["info", "warning", "error", "critical", "off"]
+      },
+      "default": {}
+    },
+    "plugins": {
+      "description": "Rule modules to load, resolved relative to this file.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    },
+    "maxFileSize": {
+      "description": "Files larger than this many bytes are skipped.",
+      "type": "integer",
+      "minimum": 1,
+      "default": 1048576
+    },
+    "maxFiles": {
+      "description": "Stop the walk after this many readable text files.",
+      "type": "integer",
+      "minimum": 1,
+      "default": 20000
+    }
+  },
+  "additionalProperties": true
+}
