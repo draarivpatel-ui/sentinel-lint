@@ -24,6 +24,6 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: test
-        run: node --test tests/
+        run: npm test
       - name: self scan
         run: node bin/sentinel-lint.mjs scan . --quiet
