@@ -8,7 +8,7 @@ single package.
 
 ```
 $ node bin/sentinel-lint.mjs scan .
-sentinel-lint 0.1.0
+sentinel-lint 0.1.1
 scan root /home/dev/project
 
 .github/workflows/release.yml
@@ -191,7 +191,7 @@ module stored elsewhere; paths named on the command line are not restricted.
 import { scan, formatSarif } from 'sentinel-lint';
 
 const result = await scan({ root: process.cwd() });
-process.stdout.write(formatSarif(result, { version: '0.1.0' }));
+process.stdout.write(formatSarif(result, { version: '0.1.1' }));
 ```
 
 `scan` never throws for a rule failure. A rule that crashes or returns junk

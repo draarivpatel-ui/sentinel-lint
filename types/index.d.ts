@@ -1,5 +1,5 @@
 /**
- * Type definitions for sentinel-lint 0.1.0.
+ * Type definitions for sentinel-lint 0.1.1.
  *
  * The package ships no JavaScript build step, so these declarations are the
  * contract for editor and TypeScript consumers. They are hand maintained and

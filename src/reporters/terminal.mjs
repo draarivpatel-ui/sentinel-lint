@@ -69,7 +69,7 @@ export function formatTerminal(result, options = {}) {
   const color = options.color === undefined ? false : Boolean(options.color);
   const quiet = options.quiet === true;
   const maxFindings = Number.isInteger(options.maxFindings) && options.maxFindings > 0 ? options.maxFindings : Infinity;
-  const version = options.version ?? '0.1.0';
+  const version = options.version ?? '0.1.1';
   const out = [];
 
   if (!quiet) {

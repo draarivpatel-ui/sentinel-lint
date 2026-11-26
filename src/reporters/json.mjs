@@ -17,7 +17,7 @@ export const JSON_REPORT_VERSION = 1;
  */
 export function toJson(result, options = {}) {
   return {
-    tool: { name: 'sentinel-lint', version: options.version ?? '0.1.0' },
+    tool: { name: 'sentinel-lint', version: options.version ?? '0.1.1' },
     reportVersion: JSON_REPORT_VERSION,
     summary: {
       filesScanned: result.summary.filesScanned,

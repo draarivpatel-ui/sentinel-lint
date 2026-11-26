@@ -149,7 +149,7 @@ export function toSarif(result, options = {}) {
         tool: {
           driver: {
             name: 'sentinel-lint',
-            version: options.version ?? '0.1.0',
+            version: options.version ?? '0.1.1',
             informationUri: options.informationUri ?? INFORMATION_URI,
             rules: rules.map(sarifRule),
           },
