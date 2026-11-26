@@ -1,0 +1,11 @@
+name: insecure
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  insecure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: tj-actions/changed-files@v40
+      - name: unsafe echo
+        run: echo "${{ github.event.pull_request.title }}"

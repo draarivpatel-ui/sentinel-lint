@@ -15,7 +15,7 @@ Severity meanings:
 
 - Severity: critical
 - CWE: CWE-94
-- Files: `.github/workflows/*.yml`, `.github/workflows/*.yaml`
+- Files: `.github/workflows/*.yml`, `.github/workflows/*.yaml`, `action.yml`, `action.yaml`, `.github/actions/*/action.yml`, `.github/actions/*/action.yaml`
 
 Catches a GitHub expression from an attacker controlled context placed directly
 inside a `run:` script, including block scalars. Pull request titles, issue
@@ -40,7 +40,7 @@ dangerous line instead of rejecting the whole file.
 
 - Severity: warning
 - CWE: CWE-1357
-- Files: `.github/workflows/*.yml`, `.github/workflows/*.yaml`
+- Files: `.github/workflows/*.yml`, `.github/workflows/*.yaml`, `action.yml`, `action.yaml`, `.github/actions/*/action.yml`, `.github/actions/*/action.yaml`
 
 Flags a third-party `uses:` reference that is a tag, a branch or missing
 entirely. Tags move. The reference implementation of this attack class is a
@@ -62,7 +62,7 @@ chain problem that this rule does not model.
 
 - Severity: error
 - CWE: CWE-272
-- Files: workflow files
+- Files: workflow files and composite action metadata
 
 Flags `permissions: write-all`, quoted or not. A workflow with a write scoped
 token and one compromised step can push to the default branch, publish
@@ -72,7 +72,7 @@ packages, edit releases and rewrite issues. Most jobs need `contents: read`.
 
 - Severity: critical
 - CWE: CWE-829
-- Files: workflow files
+- Files: workflow files and composite action metadata
 
 Flags a workflow that uses `pull_request_target` (mapping, inline or list form)
 and then checks out the pull request head or the fork repository. That

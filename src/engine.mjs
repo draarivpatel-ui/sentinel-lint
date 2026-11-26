@@ -259,6 +259,7 @@ export async function scan(options = {}) {
 
   for (const rule of enabledRules) {
     if (rule.scope === 'repo') {
+      if (walked.rootType === 'file') continue;
       const ctx = {
         path: null,
         file: null,

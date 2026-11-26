@@ -1,0 +1,56 @@
+name: sentinel-lint
+description: Zero-dependency security policy linter with SARIF 2.1.0 output
+author: sentinel-lint contributors
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Directory or file to scan
+    required: false
+    default: .
+  config:
+    description: Path to a .sentinelrc.json configuration file
+    required: false
+  format:
+    description: Report format, one of sarif, text or json
+    required: false
+    default: sarif
+  sarif-file:
+    description: Output file used when format is sarif
+    required: false
+    default: sentinel-lint.sarif
+  fail-on:
+    description: Minimum severity that fails the step, one of critical, high, medium, low or none
+    required: false
+    default: high
+  args:
+    description: Additional validated sentinel-lint scan flags
+    required: false
+
+outputs:
+  sarif-file:
+    description: Path to the generated SARIF file, empty when format is not sarif
+    value: ${{ steps.sentinel.outputs.sarif-file }}
+  findings-count:
+    description: Total number of findings reported by the scan
+    value: ${{ steps.sentinel.outputs.findings-count }}
+  exit-code:
+    description: sentinel-lint exit code
+    value: ${{ steps.sentinel.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run sentinel-lint
+      id: sentinel
+      shell: bash
+      env:
+        SENTINEL_INPUT_PATH: ${{ inputs.path }}
+        SENTINEL_INPUT_CONFIG: ${{ inputs.config }}
+        SENTINEL_INPUT_FORMAT: ${{ inputs.format }}
+        SENTINEL_INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        SENTINEL_INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        SENTINEL_INPUT_ARGS: ${{ inputs.args }}
+      run: node "$GITHUB_ACTION_PATH/bin/github-action.mjs"

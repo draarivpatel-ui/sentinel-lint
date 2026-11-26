@@ -10,20 +10,65 @@ permissions:
 
 jobs:
   test:
-    name: node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: node ${{ matrix.node }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22, 24]
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 20, 22, 24]
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
       - name: test
         run: npm test
       - name: self scan
-        run: node bin/sentinel-lint.mjs scan . --quiet
+        run: npm run self-scan
+
+  action-smoke:
+    name: action smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: scan clean example
+        id: clean
+        uses: ./
+        with:
+          path: examples/clean-repo
+          sarif-file: clean.sarif
+      - name: verify clean example
+        shell: bash
+        env:
+          SARIF_PATH: clean.sarif
+          OUTPUT_SARIF_FILE: ${{ steps.clean.outputs.sarif-file }}
+          OUTPUT_FINDINGS_COUNT: ${{ steps.clean.outputs.findings-count }}
+          OUTPUT_EXIT_CODE: ${{ steps.clean.outputs.exit-code }}
+        run: node tests/verify-action-smoke.mjs clean
+      - name: scan vulnerable example
+        id: vulnerable
+        uses: ./
+        with:
+          path: examples/vulnerable-repo
+          fail-on: none
+          sarif-file: vulnerable.sarif
+      - name: verify vulnerable example
+        shell: bash
+        env:
+          SARIF_PATH: vulnerable.sarif
+          OUTPUT_SARIF_FILE: ${{ steps.vulnerable.outputs.sarif-file }}
+          OUTPUT_FINDINGS_COUNT: ${{ steps.vulnerable.outputs.findings-count }}
+          OUTPUT_EXIT_CODE: ${{ steps.vulnerable.outputs.exit-code }}
+        run: node tests/verify-action-smoke.mjs vulnerable

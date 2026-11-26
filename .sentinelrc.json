@@ -2,7 +2,7 @@
   "$schema": "./schemas/sentinelrc.schema.json",
   "failOn": "warning",
   "include": [],
-  "exclude": ["tests/**"],
+  "exclude": ["tests/**", "examples/vulnerable-repo/**", ".sentinel-out/**"],
   "rules": {},
   "plugins": []
 }

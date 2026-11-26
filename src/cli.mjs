@@ -29,7 +29,7 @@ const HELP = `sentinel-lint ${VERSION}
 Usage: sentinel-lint <command> [path] [options]
 
 Commands:
-  scan [path]      Scan a repository (default command)
+  scan [path]      Scan a repository or file (default command)
   rules            List the security rules that are active
   init [path]      Write a starter ${CONFIG_FILE}
   help             Show this text
@@ -245,7 +245,7 @@ function summarize(result) {
   } ${summary.filesScanned === 1 ? 'file' : 'files'}`;
 }
 
-async function loadRulesForScan(configResult, cliPlugins) {
+export async function loadRulesForScan(configResult, cliPlugins) {
   const builtin = loadBuiltinRules();
   const configured = Array.isArray(configResult.config.plugins) ? configResult.config.plugins : [];
   const pluginRules = [];
@@ -272,10 +272,12 @@ async function commandScan(options, io) {
   } catch {
     throw new UsageError(`scan path not found: ${options.target ?? '.'}`);
   }
-  if (!stat.isDirectory()) throw new UsageError(`scan path is not a directory: ${options.target ?? '.'}`);
+  if (!stat.isDirectory() && !stat.isFile()) {
+    throw new UsageError(`scan path is not a file or directory: ${options.target ?? '.'}`);
+  }
 
   const configResult = await loadConfig({
-    root: target,
+    root: stat.isDirectory() ? target : path.dirname(target),
     cwd: io.cwd,
     ...(options.config === null ? {} : { configPath: options.config }),
   });
@@ -371,7 +373,7 @@ async function commandRules(options, io) {
 }
 
 const STARTER_CONFIG = {
-  $schema: 'https://raw.githubusercontent.com/sentinel-lint/sentinel-lint/main/schemas/sentinelrc.schema.json',
+  $schema: 'https://raw.githubusercontent.com/draarivpatel-ui/sentinel-lint/main/schemas/sentinelrc.schema.json',
   failOn: 'warning',
   include: [],
   exclude: [],

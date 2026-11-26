@@ -6,6 +6,8 @@
  * runs shows the numbers first and the findings second.
  */
 
+import { VERSION } from '../version.mjs';
+
 export const JSON_REPORT_VERSION = 1;
 
 /**
@@ -17,7 +19,7 @@ export const JSON_REPORT_VERSION = 1;
  */
 export function toJson(result, options = {}) {
   return {
-    tool: { name: 'sentinel-lint', version: options.version ?? '0.1.1' },
+    tool: { name: 'sentinel-lint', version: options.version ?? VERSION },
     reportVersion: JSON_REPORT_VERSION,
     summary: {
       filesScanned: result.summary.filesScanned,

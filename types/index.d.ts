@@ -1,5 +1,5 @@
 /**
- * Type definitions for sentinel-lint 0.1.1.
+ * Type definitions for sentinel-lint 0.2.0.
  *
  * The package ships no JavaScript build step, so these declarations are the
  * contract for editor and TypeScript consumers. They are hand maintained and
@@ -162,6 +162,7 @@ export interface WalkStats {
 
 export interface WalkResult {
   root: string;
+  rootType: 'file' | 'directory';
   files: ScannedFile[];
   diagnostics: Diagnostic[];
   stats: WalkStats;

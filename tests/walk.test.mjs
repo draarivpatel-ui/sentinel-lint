@@ -46,8 +46,16 @@ test('node_modules and other build directories are skipped', async (t) => {
 
 test('symbolic links are never followed', async (t) => {
   const root = await makeTree(t, { 'real.txt': 'real\n' });
-  await symlink(path.join(root, 'real.txt'), path.join(root, 'link.txt'));
-  await symlink(root, path.join(root, 'loop'));
+  try {
+    await symlink(path.join(root, 'real.txt'), path.join(root, 'link.txt'));
+    await symlink(root, path.join(root, 'loop'));
+  } catch (error) {
+    if (process.platform === 'win32' && (error.code === 'EPERM' || error.code === 'EACCES')) {
+      t.diagnostic('Windows symlink creation is not permitted in this test environment');
+      return;
+    }
+    throw error;
+  }
   const walked = await walkRepository(root);
   assert.deepEqual(
     walked.files.map((file) => file.path),

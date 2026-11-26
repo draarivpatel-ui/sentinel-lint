@@ -81,6 +81,13 @@ test('actions/script-injection only applies to workflow files', async (t) => {
   assert.equal(byRule(result, 'actions/script-injection').length, 0);
 });
 
+test('actions/script-injection applies to composite action metadata', async (t) => {
+  const result = await scanTree(t, {
+    'action.yml': 'runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: echo ${{ inputs.name }}\n',
+  });
+  assert.equal(byRule(result, 'actions/script-injection').length, 1);
+});
+
 test('actions/unpinned-action flags a mutable tag', async (t) => {
   const result = await scanTree(t, workflow(['jobs:', '  b:', '    steps:', '      - uses: tj-actions/changed-files@v40']));
   const findings = byRule(result, 'actions/unpinned-action');

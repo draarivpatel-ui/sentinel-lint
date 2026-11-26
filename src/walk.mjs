@@ -59,7 +59,7 @@ function strictDescendant(root, candidate) {
 /**
  * Walk a repository and return readable text files.
  *
- * @param {string} root Absolute or relative scan root.
+ * @param {string} root Absolute or relative scan root, either a directory or one file.
  * @param {object} [options]
  * @param {number} [options.maxFileSize] Bytes, default 1048576.
  * @param {number} [options.maxFiles] Default 20000.
@@ -70,12 +70,13 @@ function strictDescendant(root, candidate) {
  * @returns {Promise<{root: string, files: object[], diagnostics: object[], stats: object}>}
  */
 export async function walkRepository(root, options = {}) {
-  const resolvedRoot = await fs.realpath(path.resolve(root));
-  const stat = await fs.stat(resolvedRoot);
-  if (!stat.isDirectory()) {
-    throw new Error(`scan root is not a directory: ${root}`);
+  const resolvedTarget = await fs.realpath(path.resolve(root));
+  const targetStat = await fs.stat(resolvedTarget);
+  if (!targetStat.isDirectory() && !targetStat.isFile()) {
+    throw new Error(`scan root is not a file or directory: ${root}`);
   }
 
+  const resolvedRoot = targetStat.isDirectory() ? resolvedTarget : path.dirname(resolvedTarget);
   const maxFileSize = options.maxFileSize ?? 1024 * 1024;
   const maxFiles = options.maxFiles ?? 20000;
   const maxDepth = options.maxDepth ?? 32;
@@ -96,6 +97,48 @@ export async function walkRepository(root, options = {}) {
     ignoredSkipped: 0,
     limitReached: false,
   };
+
+  if (targetStat.isFile()) {
+    const relative = path.basename(resolvedTarget);
+    stats.filesVisited = 1;
+
+    const excluded = matchesAnyGlob(relative, exclude);
+    const included = include.length === 0 || matchesAnyGlob(relative, include);
+    if (!excluded && included) {
+      if (targetStat.size > maxFileSize) {
+        stats.tooLargeSkipped = 1;
+      } else {
+        try {
+          const buffer = await fs.readFile(resolvedTarget);
+          if (isBinary(buffer)) {
+            stats.binarySkipped = 1;
+          } else {
+            let text = buffer.toString('utf8');
+            if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+            files.push({
+              path: relative,
+              absolutePath: resolvedTarget,
+              name: path.basename(resolvedTarget),
+              ext: path.extname(resolvedTarget).toLowerCase(),
+              size: targetStat.size,
+              text,
+            });
+          }
+        } catch (error) {
+          stats.unreadableSkipped = 1;
+          diagnostics.push({
+            code: 'unreadable-file',
+            message: `could not read ${relative}: ${error.code ?? error.message}`,
+          });
+        }
+      }
+    } else {
+      stats.ignoredSkipped = 1;
+    }
+
+    stats.filesScanned = files.length;
+    return { root: resolvedRoot, rootType: 'file', files, diagnostics, stats };
+  }
 
   const stack = [resolvedRoot];
   let budget = maxFiles;
@@ -223,5 +266,5 @@ export async function walkRepository(root, options = {}) {
   files.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
   stats.filesScanned = files.length;
 
-  return { root: resolvedRoot, files, diagnostics, stats };
+  return { root: resolvedRoot, rootType: 'directory', files, diagnostics, stats };
 }

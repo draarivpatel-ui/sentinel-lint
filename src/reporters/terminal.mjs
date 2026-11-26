@@ -6,6 +6,8 @@
  * a string so the CLI owns the stream and the tests can assert on the text.
  */
 
+import { VERSION } from '../version.mjs';
+
 const ANSI = Object.freeze({
   reset: '\u001b[0m',
   bold: '\u001b[1m',
@@ -69,7 +71,7 @@ export function formatTerminal(result, options = {}) {
   const color = options.color === undefined ? false : Boolean(options.color);
   const quiet = options.quiet === true;
   const maxFindings = Number.isInteger(options.maxFindings) && options.maxFindings > 0 ? options.maxFindings : Infinity;
-  const version = options.version ?? '0.1.1';
+  const version = options.version ?? VERSION;
   const out = [];
 
   if (!quiet) {

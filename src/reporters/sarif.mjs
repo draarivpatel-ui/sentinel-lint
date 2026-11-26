@@ -11,10 +11,11 @@
  */
 
 import { createHash } from 'node:crypto';
+import { VERSION } from '../version.mjs';
 
 export const SARIF_SCHEMA = 'https://json.schemastore.org/sarif-2.1.0.json';
 export const SARIF_VERSION = '2.1.0';
-export const INFORMATION_URI = 'https://github.com/sentinel-lint/sentinel-lint';
+export const INFORMATION_URI = 'https://github.com/draarivpatel-ui/sentinel-lint';
 
 const LEVEL_BY_SEVERITY = Object.freeze({
   info: 'note',
@@ -149,7 +150,7 @@ export function toSarif(result, options = {}) {
         tool: {
           driver: {
             name: 'sentinel-lint',
-            version: options.version ?? '0.1.1',
+            version: options.version ?? VERSION,
             informationUri: options.informationUri ?? INFORMATION_URI,
             rules: rules.map(sarifRule),
           },

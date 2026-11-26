@@ -2,13 +2,13 @@
 
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows and MCP configurations. It ships **15 security rules**, a
-stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **359
+stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **381
 tests** that run on the Node.js built in test runner without installing a
 single package.
 
 ```
 $ node bin/sentinel-lint.mjs scan .
-sentinel-lint 0.1.1
+sentinel-lint 0.2.0
 scan root /home/dev/project
 
 .github/workflows/release.yml
@@ -74,20 +74,75 @@ By default the threshold is `warning`. `--fail-on critical` makes the command
 advisory for errors but blocking for critical findings, and `--fail-on off`
 never fails.
 
-### GitHub code scanning
+## GitHub Action
+
+Basic pull request check:
 
 ```yaml
-- name: sentinel-lint
-  run: node bin/sentinel-lint.mjs scan . --sarif --output sentinel.sarif
-- uses: github/codeql-action/upload-sarif@v3
-  with:
-    sarif_file: sentinel.sarif
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: sentinel-lint
+        uses: draarivpatel-ui/sentinel-lint@v0.2.0
+        with:
+          path: .
+          fail-on: high
 ```
 
-The SARIF log is 2.1.0, lists every rule under `tool.driver.rules`, maps
-`critical` and `error` to `error`, `warning` to `warning` and `info` to `note`,
-and gives every result a stable `partialFingerprints` hash that does not change
-when a finding moves down a file.
+GitHub Code Scanning with SARIF upload:
+
+```yaml
+name: security-scanning
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sentinel-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: sentinel-lint
+        id: sentinel
+        uses: draarivpatel-ui/sentinel-lint@v0.2.0
+        with:
+          path: .
+          format: sarif
+          sarif-file: sentinel-lint.sarif
+          fail-on: high
+      - name: upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.sentinel.outputs.sarif-file }}
+```
+
+Inputs, outputs, severity mapping, extra arguments and security details are in
+[docs/GITHUB_ACTION.md](docs/GITHUB_ACTION.md). The SARIF log is 2.1.0, lists
+every rule under `tool.driver.rules`, maps `critical` and `error` to `error`,
+`warning` to `warning` and `info` to `note`, and gives every result a stable
+`partialFingerprints` hash that does not change when a finding moves down a
+file.
 
 ## Rules
 
@@ -191,7 +246,7 @@ module stored elsewhere; paths named on the command line are not restricted.
 import { scan, formatSarif } from 'sentinel-lint';
 
 const result = await scan({ root: process.cwd() });
-process.stdout.write(formatSarif(result, { version: '0.1.1' }));
+process.stdout.write(formatSarif(result, { version: '0.2.0' }));
 ```
 
 `scan` never throws for a rule failure. A rule that crashes or returns junk
@@ -208,7 +263,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-node --test tests/        # 359 tests, no install step
+npm test                          # 381 tests, no install step
 node bin/sentinel-lint.mjs scan .   # self scan
 ```
 

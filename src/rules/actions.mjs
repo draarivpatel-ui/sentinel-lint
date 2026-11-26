@@ -9,7 +9,14 @@
 
 import { defineRule } from '../rule-api.mjs';
 
-const WORKFLOW_GLOBS = ['.github/workflows/*.yml', '.github/workflows/*.yaml'];
+const WORKFLOW_GLOBS = [
+  '.github/workflows/*.yml',
+  '.github/workflows/*.yaml',
+  'action.yml',
+  'action.yaml',
+  '.github/actions/*/action.yml',
+  '.github/actions/*/action.yaml',
+];
 const DOCS = 'docs/rules.md#';
 
 function leadingIndent(line) {
