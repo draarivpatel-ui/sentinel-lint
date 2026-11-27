@@ -1,5 +1,7 @@
 # sentinel-lint
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/draarivpatel-ui/sentinel-lint/badge)](https://securityscorecards.dev/viewer/?uri=github.com/draarivpatel-ui/sentinel-lint)
+
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows, MCP configurations, AI agent instruction files and container
 builds. It ships **28 security rules**, a stable rule API, three reporters
