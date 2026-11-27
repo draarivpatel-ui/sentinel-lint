@@ -294,6 +294,7 @@ npm run test:fuzz # fast-check property tests
 Tests are deterministic, use the real filesystem only through temporary
 directories, and never reach the network. The property-based fuzz suite uses
 `fast-check` as a development-only dependency; runtime dependencies remain zero.
+It uses seed 20261127 by default, and `FUZZ_SEED` can override it to replay a failure.
 New rules need fixtures for both the finding case and the clean case. New
 contributors can follow the four step rule quickstart in
 [CONTRIBUTING.md](CONTRIBUTING.md) and claim a scoped specification from

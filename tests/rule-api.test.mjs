@@ -194,7 +194,21 @@ test('the built in pack has no external runtime dependencies', async () => {
   const raw = await readFile(new URL('../package.json', import.meta.url), 'utf8');
   const manifest = JSON.parse(raw);
   assert.deepEqual(manifest.dependencies, {});
-  assert.deepEqual(manifest.devDependencies, { 'fast-check': '4.10.3' });
+  assert.equal(Object.hasOwn(manifest.dependencies, 'fast-check'), false);
+  assert.equal(Object.hasOwn(manifest.devDependencies, 'fast-check'), true);
+
+  const spec = manifest.devDependencies['fast-check'];
+  assert.match(
+    spec,
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    'fast-check must use an exact version, not a range',
+  );
+
+  const lockRaw = await readFile(new URL('../package-lock.json', import.meta.url), 'utf8');
+  const lock = JSON.parse(lockRaw);
+  assert.equal(lock.packages[''].devDependencies['fast-check'], spec);
+  assert.equal(lock.packages['node_modules/fast-check'].version, spec);
+  assert.equal(lock.packages['node_modules/fast-check'].dev, true);
 });
 
 test('defineRule defaults owasp metadata to a frozen empty array', () => {

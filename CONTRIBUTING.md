@@ -6,8 +6,9 @@ way.
 
 ## Ground rules
 
-1. **Zero runtime dependencies.** `package.json` keeps `dependencies` and
-   `devDependencies` empty. Node.js built in modules are the only imports.
+1. **Zero runtime dependencies.** `package.json` keeps `dependencies` empty.
+   `fast-check` is development-only for the separate fuzz suite. Node.js built in
+   modules are the only runtime imports.
 2. **Node.js 18.18 or newer.** No syntax or API that is unavailable there.
 3. **Deterministic output.** Two scans of identical input produce identical
    findings, in identical order. No timestamps, random ids or directory order.
@@ -47,7 +48,7 @@ finish. The exact files are named in each ready-to-claim specification.
 ```bash
 git clone <your fork>
 cd sentinel-lint
-npm test          # 549 tests, no install step
+npm test          # 554 tests, no install step
 npm run self-scan # self scan must stay clean
 ```
 
