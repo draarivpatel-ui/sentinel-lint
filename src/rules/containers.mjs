@@ -104,9 +104,17 @@ function collectStages(instructions) {
         image: parsed.image,
         alias: parsed.alias,
         users: [],
+        hasRuntimeCommand: false,
+        hasBuildCommand: false,
       };
       stages.push(current);
       continue;
+    }
+    if (current !== null && (instruction.instruction === 'ENTRYPOINT' || instruction.instruction === 'CMD')) {
+      current.hasRuntimeCommand = true;
+    }
+    if (current !== null && instruction.instruction === 'RUN') {
+      current.hasBuildCommand = true;
     }
     if (instruction.instruction === 'USER' && current !== null) {
       current.users.push(instruction);
@@ -156,6 +164,35 @@ function finalStageContext(text) {
   return { stage, user: effectiveUser(stage, byAlias) };
 }
 
+function imageTag(image) {
+  const withoutDigest = String(image).split('@')[0].toLowerCase();
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  if (lastColon === -1 || lastColon < lastSlash) return null;
+  return withoutDigest.slice(lastColon + 1);
+}
+
+function hasNonRootTagComponent(tag) {
+  return typeof tag === 'string' && tag.split(/[-_.]/).includes('nonroot');
+}
+
+function configuredNonRootImagePrefixes(config) {
+  if (config === null || typeof config !== 'object' || !Array.isArray(config.trustedNonRootImages)) return [];
+  return config.trustedNonRootImages.map((entry) => String(entry).trim().toLowerCase()).filter((entry) => entry.length > 0);
+}
+
+function isKnownNonRootBase(image, configuredPrefixes = []) {
+  const normalized = String(image).split('@')[0].toLowerCase();
+  const tag = imageTag(image);
+  if (!hasNonRootTagComponent(tag)) return false;
+  const trusted = ['gcr.io/distroless/', ...configuredPrefixes];
+  return trusted.some((prefix) => normalized.startsWith(prefix));
+}
+
+function isArtifactOnlyScratchStage(stage) {
+  return stage.image === 'scratch' && !stage.hasRuntimeCommand && !stage.hasBuildCommand;
+}
+
 const missingNonRootUser = defineRule({
   id: 'container/missing-non-root-user',
   title: 'Final container image has no non-root USER instruction',
@@ -165,12 +202,14 @@ const missingNonRootUser = defineRule({
   owasp: [OWASP_MISCONFIGURATION],
   docsUrl: DOCS + 'containermissing-non-root-user',
   rationale:
-    'Without a USER instruction the container process defaults to root unless the base image happens to override it. A root process inside the container makes kernel, volume and container breakout weaknesses much more damaging.',
+    'Without a USER instruction the container process defaults to root unless the base image has a documented non-root contract. A root process inside the container makes kernel, volume and container breakout weaknesses much more damaging.',
   fix: 'Create or reuse a dedicated unprivileged account and end the final image stage with USER <name or uid>. Verify any inherited user when building FROM another stage.',
   match: isDockerfile,
   check(ctx) {
     const finalStage = finalStageContext(ctx.text);
     if (finalStage === null || finalStage.user !== null) return [];
+    if (isArtifactOnlyScratchStage(finalStage.stage)) return [];
+    if (isKnownNonRootBase(finalStage.stage.image, configuredNonRootImagePrefixes(ctx.config))) return [];
     return [
       {
         line: finalStage.stage.line,

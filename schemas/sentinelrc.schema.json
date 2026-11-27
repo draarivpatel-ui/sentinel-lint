@@ -51,6 +51,15 @@
       },
       "default": []
     },
+    "trustedNonRootImages": {
+      "description": "Image repository prefixes with a documented non-root tag contract trusted by container/missing-non-root-user. The tag must still contain nonroot as a whole component.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
     "maxFileSize": {
       "description": "Files larger than this many bytes are skipped.",
       "type": "integer",

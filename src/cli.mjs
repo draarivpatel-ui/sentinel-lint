@@ -381,6 +381,7 @@ const STARTER_CONFIG = {
   rules: {},
   plugins: [],
   trustedActions: [],
+  trustedNonRootImages: [],
 };
 
 async function commandInit(options, io) {

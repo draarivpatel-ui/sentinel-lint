@@ -114,6 +114,135 @@ test('container/missing-non-root-user flags a final stage without USER', async (
   assert.equal(found[0].line, 4);
 });
 
+test('container/missing-non-root-user ignores an artifact-only scratch export', async (t) => {
+  const result = await dockerScan(
+    t,
+    [
+      'FROM example/builder:1.0.0 AS build',
+      'RUN build-app',
+      'FROM scratch AS artifacts',
+      'COPY --from=build /out /',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user still flags a runnable scratch image with an entrypoint', async (t) => {
+  const result = await dockerScan(
+    t,
+    [
+      'FROM example/builder:1.0.0 AS build',
+      'RUN build-app',
+      'FROM scratch',
+      'COPY --from=build /out/server /server',
+      'ENTRYPOINT ["/server"]',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user still flags a runnable scratch image with a command', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM scratch', 'COPY server /server', 'CMD ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user does not treat a scratch stage with RUN as artifact-only', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM scratch', 'COPY server /server', 'RUN /server --self-test', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/explicit-root-user still flags an artifact-only scratch export with USER root', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM scratch', 'COPY server /server', 'USER root', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+  assert.equal(byRule(result, 'container/explicit-root-user').length, 1);
+});
+
+test('container/missing-non-root-user accepts an allowlisted nonroot base image contract', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM gcr.io/distroless/static-debian13:nonroot-amd64', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user accepts a distroless debug nonroot tag', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM gcr.io/distroless/base-debian13:debug-nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user accepts a nonroot contract before a digest', async (t) => {
+  const result = await dockerScan(
+    t,
+    [
+      'FROM gcr.io/distroless/static-debian13:nonroot@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      'COPY server /server',
+      'ENTRYPOINT ["/server"]',
+      '',
+    ].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user still flags a runtime base without a nonroot contract', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM example/runtime:latest', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user does not trust nonroot outside the allowlist', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM example/runtime:nonroot-amd64', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user requires nonroot to be a whole tag component', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM gcr.io/distroless/static-debian13:nonrootish', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user accepts a configured nonroot image prefix', async (t) => {
+  const rootless = [
+    'FROM images.example.com/team/runtime:nonroot-amd64',
+    'COPY server /server',
+    'ENTRYPOINT ["/server"]',
+    '',
+  ].join('\n');
+  const result = await scanTree(t, { Dockerfile: `${rootless}\n` }, { config: { trustedNonRootImages: ['images.example.com/team/'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user still requires a nonroot tag for a configured prefix', async (t) => {
+  const runtime = [
+    'FROM images.example.com/team/runtime:latest',
+    'COPY server /server',
+    'ENTRYPOINT ["/server"]',
+    '',
+  ].join('\n');
+  const result = await scanTree(t, { Dockerfile: `${runtime}\n` }, { config: { trustedNonRootImages: ['images.example.com/team/'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
 test('container root rules inherit USER from an earlier named stage', async (t) => {
   const result = await dockerScan(
     t,

@@ -54,12 +54,24 @@ maintainer account takeover followed by a retag.
 - uses: some-org/some-action@0123456789abcdef0123456789abcdef01234567
 ```
 
-First-party `actions/*` and `github/*` references, local `./path` actions and
-`docker://` references are exempt. Docker references are a separate supply
-chain problem that this rule does not model. A narrow exception can be declared
-with the `trustedActions` config array for an owner such as `example-org` or a
-repository prefix such as `example-org/example-action`; pinning to a commit SHA
-remains the stronger default.
+First-party `actions/*` and `github/*` references, workspace-local `./path`
+actions, self-repository `$/path` actions and `docker://` references are exempt.
+Docker references are a separate supply chain problem that this rule does not
+model. A narrow exception can be declared with the `trustedActions` config array
+for an owner such as `example-org` or a repository prefix such as
+`example-org/example-action`; pinning to a commit SHA remains the stronger
+default.
+
+During a directory scan the rule also reads `.github/workflows/actions.lock`
+when it is present. For lockfile schema `v0.0.3`, the scanner uses the
+`workflows` dependency lists and the `dependencies` commit metadata offline.
+A visible tag is accepted only when the exact workflow path is onboarded, the
+exact dependency key is listed there and that dependency records a `sha1-`
+commit followed by 40 hexadecimal characters. Owner and repository casing is
+canonicalized, while ref spelling and action path casing stay significant. If
+the lockfile is absent, incomplete or invalid for that dependency, the warning
+remains and reports that the action is not commit-pinned in the workflow or
+lockfile.
 
 ## actions/write-all-permissions
 
@@ -224,9 +236,18 @@ builds are resolved through named stages, so a final `FROM base` inherits a
 `USER` set in `base`. A variable such as `USER ${APP_USER}` counts as an
 explicit decision because the scanner cannot evaluate build arguments.
 
-This is a warning because an external base image can itself declare a non-root
-user. Ending the final stage with an explicit non-root user makes the runtime
-contract reviewable.
+A final `FROM scratch` stage with no `ENTRYPOINT`, `CMD` or `RUN` is treated
+as an artifact-only export rather than a runtime image. A scratch stage that
+declares an entrypoint, command or build command is still evaluated. The
+artifact-only suppression never applies to `container/explicit-root-user`.
+
+The rule also recognizes a narrow external non-root contract: the image must
+be under the built in `gcr.io/distroless/` prefix or a repository prefix in
+the `trustedNonRootImages` config array, and its tag must contain `nonroot` as
+a whole component when split on hyphens, underscores and dots. A digest is
+stripped before the tag is read. A random image whose tag merely contains the
+letters `nonroot` is still flagged. Ending the final stage with an explicit
+non-root user remains the most reviewable contract.
 
 ## container/explicit-root-user
 

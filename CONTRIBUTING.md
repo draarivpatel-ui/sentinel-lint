@@ -48,7 +48,7 @@ finish. The exact files are named in each ready-to-claim specification.
 ```bash
 git clone <your fork>
 cd sentinel-lint
-npm test          # 554 tests, no install step
+npm test          # 584 tests, no install step
 npm run self-scan # self scan must stay clean
 ```
 
@@ -86,9 +86,9 @@ export const exampleRule = defineRule({
 | `ctx.file` | `{ path, name, ext, size, text }` | `null` |
 | `ctx.path` | repository relative path | `null` |
 | `ctx.root` | absolute scan root | absolute scan root |
-| `ctx.files` | undefined | every scanned file record |
-| `ctx.paths` | undefined | every repository relative path |
-| `ctx.read` | undefined | read a scanned file by path, or `null` |
+| `ctx.files` | every scanned file record | every scanned file record |
+| `ctx.paths` | every repository relative path | every repository relative path |
+| `ctx.read` | read a scanned file by path, or `null` | read a scanned file by path, or `null` |
 | `ctx.report` | report a finding | report a finding |
 
 Return an array of findings, call `ctx.report`, or both. A finding needs a

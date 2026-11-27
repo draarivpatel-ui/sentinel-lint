@@ -9,6 +9,27 @@ function workflow(lines) {
   return { [WORKFLOW]: `${lines.join('\n')}\n` };
 }
 
+function actionsLock({
+  workflowPath = WORKFLOW,
+  key = 'example-org/example-action@v1.0.0',
+  ref = 'v1.0.0',
+  commit = `sha1-${PINNED}`,
+} = {}) {
+  return [
+    "version: 'v0.0.3'",
+    'workflows:',
+    `  '${workflowPath}':`,
+    `    - '${key}'`,
+    'dependencies:',
+    `  '${key}':`,
+    `    ref: '${ref}'`,
+    `    commit: '${commit}'`,
+    '    owner_id: 1',
+    '    repo_id: 2',
+    '',
+  ].join('\n');
+}
+
 test('actions/script-injection flags a pull request title in run:', async (t) => {
   const result = await scanTree(
     t,
@@ -95,11 +116,11 @@ test('actions/script-injection handles CRLF workflow line endings', async (t) =>
   assert.equal(byRule(result, 'actions/script-injection').length, 1);
 });
 
-test('actions/unpinned-action flags a mutable tag', async (t) => {
+test('actions/unpinned-action flags a ref that is not commit pinned', async (t) => {
   const result = await scanTree(t, workflow(['jobs:', '  b:', '    steps:', '      - uses: tj-actions/changed-files@v40']));
   const findings = byRule(result, 'actions/unpinned-action');
   assert.equal(findings.length, 1);
-  assert.match(findings[0].message, /mutable ref "v40"/);
+  assert.match(findings[0].message, /not commit-pinned in the workflow or lockfile/);
 });
 
 test('actions/unpinned-action allows a full commit SHA', async (t) => {
@@ -123,11 +144,112 @@ test('actions/unpinned-action exempts local and docker references', async (t) =>
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
 });
 
+test('actions/unpinned-action exempts self-repository references', async (t) => {
+  const result = await scanTree(
+    t,
+    workflow(['jobs:', '  b:', '    steps:', '      - uses: $/.github/actions/build']),
+  );
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action does not exempt a dollar sign inside a third-party path', async (t) => {
+  const result = await scanTree(
+    t,
+    workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example$action']),
+  );
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
 test('actions/unpinned-action flags a missing version reference', async (t) => {
   const result = await scanTree(t, workflow(['jobs:', '  b:', '    steps:', '      - uses: some-org/some-action']));
   const findings = byRule(result, 'actions/unpinned-action');
   assert.equal(findings.length, 1);
   assert.match(findings[0].message, /has no version reference/);
+});
+
+test('actions/unpinned-action accepts a dependency pinned by actions.lock', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock(),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action canonicalizes owner and repository casing in actions.lock', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: Example-Org/Example-Action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock(),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action preserves ref casing when comparing actions.lock keys', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@V1.0.0']),
+    '.github/workflows/actions.lock': actionsLock(),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action still fires when the lockfile omits the dependency', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock({ key: 'example-org/other-action@v1.0.0' }),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action still fires when the lockfile commit is invalid', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock({ commit: 'sha1-not-a-commit' }),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action ignores a missing or unsupported lockfile schema version', async (t) => {
+  const unsupported = actionsLock().replace("version: 'v0.0.3'", "version: 'v0.0.4'");
+  const missing = actionsLock().split('\n').slice(1).join('\n');
+  for (const lockfile of [unsupported, missing]) {
+    const result = await scanTree(t, {
+      ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+      '.github/workflows/actions.lock': lockfile,
+    });
+    assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+  }
+});
+
+test('actions/unpinned-action ignores a lockfile entry for another workflow', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock({ workflowPath: '.github/workflows/release.yml' }),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action does not canonicalize action path casing in actions.lock', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/repo/Actions/deploy@v1']),
+    '.github/workflows/actions.lock': actionsLock({ key: 'example-org/repo/actions/deploy@v1', ref: 'v1' }),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action reads a flow dependency list in actions.lock', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': [
+      "version: 'v0.0.3'",
+      'workflows:',
+      "  '.github/workflows/ci.yml': ['example-org/example-action@v1.0.0']",
+      'dependencies:',
+      "  'example-org/example-action@v1.0.0':",
+      "    ref: 'v1.0.0'",
+      `    commit: 'sha1-${PINNED}'`,
+      '',
+    ].join('\n'),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
 });
 
 test('actions/write-all-permissions flags write-all', async (t) => {

@@ -186,6 +186,24 @@ test('a repo rule receives every path and can read files', async (t) => {
   assert.equal(observed.absolute, null);
 });
 
+test('a file rule receives read only repository context', async (t) => {
+  let observed = null;
+  const rule = fileRule('demo/file-inspect', (ctx) => {
+    observed = {
+      files: ctx.files.map((file) => file.path),
+      paths: [...ctx.paths],
+      sibling: ctx.read('data/values.txt'),
+      escaped: ctx.read('../outside.txt'),
+    };
+    return [];
+  });
+  await scanTree(t, { 'note.txt': 'hello\n', 'data/values.txt': 'one\n' }, { rules: [rule] });
+  assert.deepEqual(observed.files, ['data/values.txt', 'note.txt']);
+  assert.deepEqual(observed.paths, ['data/values.txt', 'note.txt']);
+  assert.equal(observed.sibling, 'one\n');
+  assert.equal(observed.escaped, null);
+});
+
 test('a repo rule can report a finding without a file', async (t) => {
   const rule = defineRule({
     id: 'demo/repo-finding',

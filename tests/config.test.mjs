@@ -187,3 +187,36 @@ test('loadConfig returns empty trustedActions when no config file exists', async
   const result = await loadConfig({ root, cwd: root });
   assert.deepEqual(result.config.trustedActions, []);
 });
+
+test('validateConfig defaults trustedNonRootImages to an empty list', () => {
+  assert.deepEqual(validateConfig({}).config.trustedNonRootImages, []);
+  assert.deepEqual(validateConfig(undefined).config.trustedNonRootImages, []);
+});
+
+test('validateConfig accepts trusted non-root image repository prefixes', () => {
+  const { config, warnings } = validateConfig({
+    trustedNonRootImages: ['images.example.com/team/', 'localhost:5000/team/'],
+  });
+  assert.deepEqual(config.trustedNonRootImages, ['images.example.com/team/', 'localhost:5000/team/']);
+  assert.deepEqual(warnings, []);
+});
+
+test('validateConfig rejects malformed trustedNonRootImages values', () => {
+  assert.throws(() => validateConfig({ trustedNonRootImages: 'images.example.com/team/' }), ConfigError);
+  assert.throws(() => validateConfig({ trustedNonRootImages: [''] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedNonRootImages: [42] }), ConfigError);
+});
+
+test('validateConfig rejects tags digests and whitespace in trustedNonRootImages', () => {
+  assert.throws(() => validateConfig({ trustedNonRootImages: ['images.example.com/team/runtime:nonroot'] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedNonRootImages: ['images.example.com/team/runtime@sha256:abc'] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedNonRootImages: ['images.example.com/team runtime'] }), ConfigError);
+});
+
+test('loadConfig reads trustedNonRootImages from the scan root config', async (t) => {
+  const root = await makeTree(t, {
+    [CONFIG_FILE]: '{"trustedNonRootImages": ["images.example.com/team/"]}\n',
+  });
+  const result = await loadConfig({ root, cwd: root });
+  assert.deepEqual(result.config.trustedNonRootImages, ['images.example.com/team/']);
+});

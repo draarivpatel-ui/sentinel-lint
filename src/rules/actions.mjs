@@ -290,6 +290,256 @@ function isTrustedActionPath(pathPart, trustedActions) {
   return false;
 }
 
+const ACTIONS_LOCK_PATH = '.github/workflows/actions.lock';
+const LOCKFILE_COMMIT_RE = /^sha1-[0-9a-fA-F]{40}$/;
+
+function stripYamlComment(text) {
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote === '"' && char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        if (quote === "'" && text[index + 1] === "'") {
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '#' && (index === 0 || /\s/.test(text[index - 1]))) {
+      return text.slice(0, index);
+    }
+  }
+  return text;
+}
+
+function yamlScalar(raw) {
+  const value = stripYamlComment(String(raw)).trim();
+  if (value.length >= 2 && value[0] === "'" && value[value.length - 1] === "'") {
+    return value.slice(1, -1).replace(/''/g, "'");
+  }
+  if (value.length >= 2 && value[0] === '"' && value[value.length - 1] === '"') {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === 'string' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return value;
+}
+
+function splitYamlMapping(line) {
+  const indent = leadingIndent(line);
+  let quote = null;
+  let escaped = false;
+  for (let index = indent; index < line.length; index += 1) {
+    const char = line[index];
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote === '"' && char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        if (quote === "'" && line[index + 1] === "'") {
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === ':' && (index + 1 === line.length || /\s/.test(line[index + 1]))) {
+      return {
+        indent,
+        key: yamlScalar(line.slice(indent, index)),
+        rawValue: line.slice(index + 1),
+      };
+    }
+  }
+  return null;
+}
+
+function yamlListItem(line) {
+  const match = /^[ \t]*-[ \t]+(.*)$/.exec(line);
+  return match === null ? null : yamlScalar(match[1]);
+}
+
+function parseYamlFlowSequence(raw) {
+  const value = stripYamlComment(String(raw)).trim();
+  if (!value.startsWith('[') || !value.endsWith(']')) return null;
+  const inner = value.slice(1, -1).trim();
+  if (inner === '') return [];
+  const items = [];
+  let start = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index <= inner.length; index += 1) {
+    const char = inner[index];
+    const atEnd = index === inner.length;
+    if (!atEnd && quote !== null) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (quote === '"' && char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        if (quote === "'" && inner[index + 1] === "'") {
+          index += 1;
+        } else {
+          quote = null;
+        }
+      }
+      continue;
+    }
+    if (!atEnd && (char === '"' || char === "'")) {
+      quote = char;
+      continue;
+    }
+    if (atEnd || char === ',') {
+      const item = yamlScalar(inner.slice(start, index));
+      if (item === null) return null;
+      items.push(item);
+      start = index + 1;
+    }
+  }
+  return items;
+}
+
+function canonicalActionKey(spec) {
+  const at = spec.lastIndexOf('@');
+  const pathPart = at === -1 ? spec : spec.slice(0, at);
+  const ref = at === -1 ? null : spec.slice(at + 1);
+  const parts = pathPart.split('/');
+  if (parts.length > 0) parts[0] = parts[0].toLowerCase();
+  if (parts.length > 1) parts[1] = parts[1].toLowerCase();
+  return `${parts.join('/')}${ref === null ? '' : `@${ref}`}`;
+}
+
+export function parseActionsLock(text) {
+  const workflows = new Map();
+  const dependencies = new Map();
+  let version = null;
+  let section = null;
+  let currentWorkflow = null;
+  let currentWorkflowIndent = -1;
+  let currentDependency = null;
+  let currentDependencyIndent = -1;
+
+  for (const line of workflowLines(text)) {
+    if (line.trim() === '' || isCommentLine(line)) continue;
+    const indent = leadingIndent(line);
+    if (indent === 0) {
+      const mapping = splitYamlMapping(line);
+      if (mapping !== null && mapping.key === 'version') {
+        version = yamlScalar(mapping.rawValue);
+      }
+      section = mapping !== null && mapping.key === 'workflows'
+        ? 'workflows'
+        : mapping !== null && mapping.key === 'dependencies'
+          ? 'dependencies'
+          : null;
+      currentWorkflow = null;
+      currentWorkflowIndent = -1;
+      currentDependency = null;
+      currentDependencyIndent = -1;
+      continue;
+    }
+
+    if (section === 'workflows') {
+      const item = yamlListItem(line);
+      if (item !== null && currentWorkflow !== null && indent > currentWorkflowIndent) {
+        if (item.length > 0) workflows.get(currentWorkflow).push(canonicalActionKey(item));
+        continue;
+      }
+      const mapping = splitYamlMapping(line);
+      if (mapping === null || mapping.key === null || mapping.key === '') continue;
+      const sequence = parseYamlFlowSequence(mapping.rawValue);
+      const entries = sequence === null ? [] : sequence.filter((entry) => entry.length > 0).map(canonicalActionKey);
+      workflows.set(mapping.key, entries);
+      currentWorkflow = mapping.key;
+      currentWorkflowIndent = mapping.indent;
+      continue;
+    }
+
+    if (section === 'dependencies') {
+      const mapping = splitYamlMapping(line);
+      if (mapping === null || mapping.key === null || mapping.key === '') continue;
+      const value = stripYamlComment(mapping.rawValue).trim();
+      if (value === '') {
+        currentDependency = canonicalActionKey(mapping.key);
+        currentDependencyIndent = mapping.indent;
+        if (!dependencies.has(currentDependency)) dependencies.set(currentDependency, { commit: null });
+        continue;
+      }
+      if (
+        currentDependency !== null &&
+        indent > currentDependencyIndent &&
+        mapping.key === 'commit'
+      ) {
+        dependencies.get(currentDependency).commit = yamlScalar(mapping.rawValue);
+      }
+    }
+  }
+
+  return { version, workflows, dependencies };
+}
+
+const actionsLockCache = new WeakMap();
+
+function readActionsLock(ctx) {
+  if (typeof ctx.read !== 'function') return null;
+  let text = null;
+  try {
+    text = ctx.read(ACTIONS_LOCK_PATH);
+  } catch {
+    return null;
+  }
+  if (typeof text !== 'string') return null;
+  const cacheKey = Array.isArray(ctx.files) ? ctx.files : null;
+  if (cacheKey !== null) {
+    const cached = actionsLockCache.get(cacheKey);
+    if (cached !== undefined && cached.text === text) return cached.parsed;
+  }
+  const parsed = parseActionsLock(text);
+  if (cacheKey !== null) actionsLockCache.set(cacheKey, { text, parsed });
+  return parsed;
+}
+
+function isPinnedByActionsLock(spec, workflowPath, lock) {
+  if (lock === null || lock.version !== 'v0.0.3') return false;
+  const key = canonicalActionKey(spec);
+  const workflowEntries = lock.workflows.get(workflowPath);
+  if (!Array.isArray(workflowEntries) || !workflowEntries.includes(key)) return false;
+  const dependency = lock.dependencies.get(key);
+  return dependency !== undefined && LOCKFILE_COMMIT_RE.test(dependency.commit ?? '');
+}
+
 const unpinnedAction = defineRule({
   id: 'actions/unpinned-action',
   title: 'Third-party action is referenced by a mutable tag or branch',
@@ -298,19 +548,20 @@ const unpinnedAction = defineRule({
   cwe: 'CWE-1357',
   docsUrl: DOCS + 'actionsunpinned-action',
   rationale:
-    'A tag such as v4 or a branch such as main can be moved by the action owner, and a compromised release then runs in your workflow with your secrets. A full commit SHA freezes the reviewed code. First party actions and local actions are exempt.',
+    'A tag such as v4 or a branch such as main can be moved by the action owner, and a compromised release then runs in your workflow with your secrets. A full commit SHA freezes the reviewed code. First party actions, workspace local actions, self-repository actions and references pinned by a workflow lockfile are exempt.',
   fix: 'Pin the action to a full 40 character commit SHA and let a dependency bot update it deliberately.',
   appliesTo: WORKFLOW_GLOBS,
   check(ctx) {
     const findings = [];
     const lines = workflowLines(ctx.text);
+    const lock = readActionsLock(ctx);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
       if (isCommentLine(line)) continue;
       const parsed = parseUses(line);
       if (parsed === null) continue;
       const { spec, column } = parsed;
-      if (spec.startsWith('./') || spec.startsWith('docker://')) continue;
+      if (spec.startsWith('./') || spec.startsWith('$/') || spec.startsWith('docker://')) continue;
 
       const at = spec.lastIndexOf('@');
       const pathPart = at === -1 ? spec : spec.slice(0, at);
@@ -320,14 +571,15 @@ const unpinnedAction = defineRule({
 
       const ref = at === -1 ? null : spec.slice(at + 1);
       if (ref !== null && isPinnedActionRef(ref)) continue;
+      if (isPinnedByActionsLock(spec, ctx.path, lock)) continue;
 
       findings.push({
         line: index + 1,
         column,
         message:
           ref === null
-            ? `Third-party action "${spec}" has no version reference; pin it to a full 40 character commit SHA.`
-            : `Third-party action "${spec}" uses the mutable ref "${ref}"; pin it to a full 40 character commit SHA.`,
+            ? `Third-party action "${spec}" has no version reference and is not commit-pinned in the workflow or lockfile; pin it to a full 40 character commit SHA.`
+            : `Third-party action "${spec}" uses ref "${ref}" but is not commit-pinned in the workflow or lockfile; pin it to a full 40 character commit SHA.`,
       });
     }
     return findings;

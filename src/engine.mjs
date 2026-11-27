@@ -119,6 +119,13 @@ export async function scan(options = {}) {
   }
 
   const filesByPath = new Map(walked.files.map((file) => [file.path, file]));
+  const repositoryPaths = walked.files.map((file) => file.path);
+  const readRepositoryFile = (filePath) => {
+    const normalized = normalizeRepoRelative(filePath);
+    if (normalized === null) return null;
+    const file = filesByPath.get(normalized);
+    return file === undefined ? null : file.text;
+  };
   const linesCache = new Map();
   const ignoreCache = new Map();
   const findings = [];
@@ -269,13 +276,8 @@ export async function scan(options = {}) {
         root: walked.root,
         config,
         files: walked.files,
-        paths: walked.files.map((file) => file.path),
-        read: (filePath) => {
-          const normalized = normalizeRepoRelative(filePath);
-          if (normalized === null) return null;
-          const file = filesByPath.get(normalized);
-          return file === undefined ? null : file.text;
-        },
+        paths: repositoryPaths,
+        read: readRepositoryFile,
         report: () => {},
       };
       runRuleCheck(rule, ctx, null);
@@ -310,6 +312,9 @@ export async function scan(options = {}) {
         lineCount: linesFor(file).length,
         root: walked.root,
         config,
+        files: walked.files,
+        paths: repositoryPaths,
+        read: readRepositoryFile,
         report: () => {},
       };
       runRuleCheck(rule, ctx, file);

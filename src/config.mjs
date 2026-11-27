@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   rules: Object.freeze({}),
   plugins: Object.freeze([]),
   trustedActions: Object.freeze([]),
+  trustedNonRootImages: Object.freeze([]),
   maxFileSize: 1024 * 1024,
   maxFiles: 20000,
 });
@@ -33,6 +34,7 @@ const KNOWN_KEYS = new Set([
   'rules',
   'plugins',
   'trustedActions',
+  'trustedNonRootImages',
   'maxFileSize',
   'maxFiles',
 ]);
@@ -77,6 +79,29 @@ function validateTrustedActions(value) {
     const normalized = entry.trim();
     if (!/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){0,4}$/.test(normalized)) {
       throw new ConfigError(`"trustedActions" entry "${normalized}" must look like owner, owner/repo or owner/repo/path`);
+    }
+    trusted.push(normalized);
+  }
+  return trusted;
+}
+
+function validateTrustedNonRootImages(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ConfigError('"trustedNonRootImages" must be an array of image repository prefixes');
+  }
+  const trusted = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw new ConfigError('"trustedNonRootImages" contains a non-string or empty image repository prefix');
+    }
+    const normalized = entry.trim();
+    const lastSlash = normalized.lastIndexOf('/');
+    const lastColon = normalized.lastIndexOf(':');
+    if (/\s/.test(normalized) || normalized.includes('@') || lastColon > lastSlash) {
+      throw new ConfigError(
+        `"trustedNonRootImages" entry "${normalized}" must be an image repository prefix without whitespace, a tag or a digest`,
+      );
     }
     trusted.push(normalized);
   }
@@ -150,6 +175,7 @@ export function validateConfig(raw) {
     rules,
     plugins,
     trustedActions: validateTrustedActions(raw.trustedActions),
+    trustedNonRootImages: validateTrustedNonRootImages(raw.trustedNonRootImages),
     maxFileSize: validatePositiveInteger(raw.maxFileSize, 'maxFileSize', DEFAULT_CONFIG.maxFileSize),
     maxFiles: validatePositiveInteger(raw.maxFiles, 'maxFiles', DEFAULT_CONFIG.maxFiles),
   };
@@ -204,6 +230,7 @@ export async function loadConfig(options = {}) {
         rules: {},
         plugins: [],
         trustedActions: [],
+        trustedNonRootImages: [],
       },
       path: null,
       configDir: root,

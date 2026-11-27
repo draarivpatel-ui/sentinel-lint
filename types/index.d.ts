@@ -67,6 +67,9 @@ export interface FileRuleContext {
   lineCount: number;
   root: string;
   config: Readonly<SentinelConfig>;
+  files: ScannedFile[];
+  paths: string[];
+  read(filePath: string): string | null;
   report: (...args: ReportArgument) => void;
 }
 
@@ -125,6 +128,7 @@ export interface SentinelConfig {
   rules: Record<string, Severity | 'off'>;
   plugins: string[];
   trustedActions: string[];
+  trustedNonRootImages: string[];
   maxFileSize: number;
   maxFiles: number;
 }
@@ -137,6 +141,7 @@ export interface RawConfig {
   rules?: Record<string, Severity | 'off'>;
   plugins?: string[];
   trustedActions?: string[];
+  trustedNonRootImages?: string[];
   maxFileSize?: number;
   maxFiles?: number;
 }
