@@ -149,3 +149,41 @@ test('rules cannot be assigned through __proto__', () => {
   assert.throws(() => validateConfig(raw), ConfigError);
   assert.equal({}.polluted, undefined);
 });
+
+test('validateConfig defaults trustedActions to an empty list', () => {
+  assert.deepEqual(validateConfig({}).config.trustedActions, []);
+  assert.deepEqual(validateConfig(undefined).config.trustedActions, []);
+});
+
+test('validateConfig accepts owner and repository trusted action prefixes', () => {
+  const { config, warnings } = validateConfig({ trustedActions: ['example-org', 'example-org/example-action'] });
+  assert.deepEqual(config.trustedActions, ['example-org', 'example-org/example-action']);
+  assert.deepEqual(warnings, []);
+});
+
+test('validateConfig rejects a non-array trustedActions value', () => {
+  assert.throws(() => validateConfig({ trustedActions: 'example-org' }), ConfigError);
+});
+
+test('validateConfig rejects action refs in trustedActions', () => {
+  assert.throws(() => validateConfig({ trustedActions: ['example-org/example-action@v1'] }), ConfigError);
+});
+
+test('validateConfig rejects empty trustedActions entries', () => {
+  assert.throws(() => validateConfig({ trustedActions: [''] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedActions: [42] }), ConfigError);
+});
+
+test('loadConfig reads trustedActions from the scan root config', async (t) => {
+  const root = await makeTree(t, {
+    [CONFIG_FILE]: '{"trustedActions": ["example-org/example-action"]}\n',
+  });
+  const result = await loadConfig({ root, cwd: root });
+  assert.deepEqual(result.config.trustedActions, ['example-org/example-action']);
+});
+
+test('loadConfig returns empty trustedActions when no config file exists', async (t) => {
+  const root = await makeTempDir(t);
+  const result = await loadConfig({ root, cwd: root });
+  assert.deepEqual(result.config.trustedActions, []);
+});

@@ -17,6 +17,7 @@ const WORKFLOW_GLOBS = [
   '.github/actions/*/action.yml',
   '.github/actions/*/action.yaml',
 ];
+const REPOSITORY_WORKFLOW_GLOBS = ['.github/workflows/*.yml', '.github/workflows/*.yaml'];
 const DOCS = 'docs/rules.md#';
 
 function leadingIndent(line) {
@@ -276,6 +277,19 @@ export function isPinnedActionRef(ref) {
 
 const FIRST_PARTY_ACTION_OWNERS = new Set(['actions', 'github']);
 
+function configuredTrustedActions(config) {
+  if (config === null || typeof config !== 'object' || !Array.isArray(config.trustedActions)) return [];
+  return config.trustedActions.map((entry) => String(entry).toLowerCase());
+}
+
+function isTrustedActionPath(pathPart, trustedActions) {
+  const normalized = String(pathPart).toLowerCase();
+  for (const trusted of trustedActions) {
+    if (normalized === trusted || normalized.startsWith(`${trusted}/`)) return true;
+  }
+  return false;
+}
+
 const unpinnedAction = defineRule({
   id: 'actions/unpinned-action',
   title: 'Third-party action is referenced by a mutable tag or branch',
@@ -302,6 +316,7 @@ const unpinnedAction = defineRule({
       const pathPart = at === -1 ? spec : spec.slice(0, at);
       const owner = pathPart.split('/')[0].toLowerCase();
       if (FIRST_PARTY_ACTION_OWNERS.has(owner)) continue;
+      if (isTrustedActionPath(pathPart, configuredTrustedActions(ctx.config))) continue;
 
       const ref = at === -1 ? null : spec.slice(at + 1);
       if (ref !== null && isPinnedActionRef(ref)) continue;
@@ -482,9 +497,253 @@ const pullRequestTargetCheckout = defineRule({
   },
 });
 
+function mappingKey(line) {
+  const match = /^([ \t]*)(?:(['"])(.*?)\2|([A-Za-z0-9_.-]+))[ \t]*:(?:[ \t]*(.*))?$/.exec(line);
+  if (match === null) return null;
+  return {
+    indent: match[1].length,
+    key: match[3] ?? match[4],
+    column: match[1].length + 1,
+  };
+}
+
+/**
+ * Approximate the workflow and job permission blocks that matter for token
+ * scope. This is deliberately structural rather than a text search: an input
+ * named permissions under a step must not count as a job permissions block.
+ */
+export function analyzeWorkflowPermissions(inputLines) {
+  const lines = inputLines.map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+  const jobs = [];
+  let topLevelPermissions = false;
+  let inJobs = false;
+  let jobsIndent = -1;
+  let jobIndent = null;
+  let jobChildIndent = null;
+  let currentJob = null;
+
+  function finishJob() {
+    if (currentJob !== null) jobs.push(currentJob);
+    currentJob = null;
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() === '' || isCommentLine(line)) continue;
+    const parsed = mappingKey(line);
+    if (parsed === null) continue;
+    const key = parsed.key.toLowerCase();
+
+    if (parsed.indent === 0) {
+      finishJob();
+      if (key === 'permissions') topLevelPermissions = true;
+      inJobs = key === 'jobs';
+      jobsIndent = inJobs ? parsed.indent : -1;
+      jobIndent = null;
+      jobChildIndent = null;
+      continue;
+    }
+
+    if (!inJobs) continue;
+    if (parsed.indent <= jobsIndent) {
+      finishJob();
+      inJobs = false;
+      jobIndent = null;
+      jobChildIndent = null;
+      continue;
+    }
+
+    if (jobIndent === null || parsed.indent === jobIndent) {
+      finishJob();
+      jobIndent = parsed.indent;
+      jobChildIndent = null;
+      currentJob = {
+        name: parsed.key,
+        line: index + 1,
+        column: parsed.column,
+        hasPermissions: false,
+      };
+      continue;
+    }
+
+    if (parsed.indent > jobIndent) {
+      if (jobChildIndent === null) jobChildIndent = parsed.indent;
+      if (parsed.indent === jobChildIndent && key === 'permissions' && currentJob !== null) {
+        currentJob.hasPermissions = true;
+      }
+    }
+  }
+
+  finishJob();
+  return { topLevelPermissions, jobs };
+}
+
+function firstContentLine(lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index].trim() === '' || isCommentLine(lines[index])) continue;
+    return { line: index + 1, column: (/^[ \t]*/.exec(lines[index]) ?? [''])[0].length + 1 };
+  }
+  return { line: 1, column: 1 };
+}
+
+const missingPermissions = defineRule({
+  id: 'actions/missing-permissions',
+  title: 'Workflow job has no explicit GITHUB_TOKEN permissions',
+  category: 'actions',
+  severity: 'warning',
+  cwe: 'CWE-272',
+  owasp: ['A05:2021-Security Misconfiguration'],
+  docsUrl: DOCS + 'actionsmissing-permissions',
+  rationale:
+    'When neither the workflow nor a job declares permissions, the job inherits repository dependent defaults that may include write scopes. Explicit permissions make the token contract reviewable and prevent silent widening when repository defaults change.',
+  fix: 'Add a workflow level permissions block such as contents: read, or give every uncovered job the smallest permissions block it needs.',
+  appliesTo: REPOSITORY_WORKFLOW_GLOBS,
+  check(ctx) {
+    const lines = workflowLines(ctx.text);
+    const analysis = analyzeWorkflowPermissions(lines);
+    if (analysis.topLevelPermissions) return [];
+
+    if (analysis.jobs.length === 0) {
+      const first = firstContentLine(lines);
+      return [
+        {
+          line: first.line,
+          column: first.column,
+          message:
+            'This workflow declares no explicit permissions at workflow or job level. Add a least privilege permissions block instead of inheriting repository defaults.',
+        },
+      ];
+    }
+
+    return analysis.jobs
+      .filter((job) => !job.hasPermissions)
+      .map((job) => ({
+        line: job.line,
+        column: job.column,
+        message: `Job "${job.name}" has no explicit permissions and no workflow level permissions block covers it. Declare least privilege for this job or the workflow.`,
+      }));
+  },
+});
+
+function continuationEnded(line) {
+  return /\\[ \t]*$/.test(line);
+}
+
+function hasOpenExpression(text) {
+  const opens = (text.match(/\$\{\{/g) ?? []).length;
+  const closes = (text.match(/\}\}/g) ?? []).length;
+  return opens > closes;
+}
+
+function heredocDelimiter(text) {
+  const match = /<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_-]*)\1/.exec(text);
+  return match === null ? null : match[2];
+}
+
+/**
+ * Collect logical shell units inside a run block. Continuation lines and
+ * heredoc bodies stay attached to the command that consumes them, which keeps
+ * GITHUB_ENV writes precise without treating an entire multi-command run block
+ * as one finding.
+ */
+export function collectShellUnits(lines, block) {
+  const contentStart = blockContentStart(lines, block);
+  if (contentStart > block.endLine) return [];
+  const blockLines = lines.slice(contentStart - 1, block.endLine);
+  const units = [];
+
+  let index = 0;
+  while (index < blockLines.length) {
+    if (blockLines[index].trim() === '' || isCommentLine(blockLines[index])) {
+      index += 1;
+      continue;
+    }
+
+    const start = index;
+    let cursor = index;
+    const parts = [blockLines[cursor]];
+    while (
+      (continuationEnded(blockLines[cursor]) || hasOpenExpression(parts.join('\n'))) &&
+      cursor + 1 < blockLines.length
+    ) {
+      cursor += 1;
+      parts.push(blockLines[cursor]);
+    }
+
+    let text = parts.join('\n');
+    const delimiter = heredocDelimiter(text);
+    if (delimiter !== null) {
+      while (cursor + 1 < blockLines.length) {
+        cursor += 1;
+        parts.push(blockLines[cursor]);
+        if (blockLines[cursor].trim() === delimiter) break;
+      }
+      text = parts.join('\n');
+    }
+
+    units.push({
+      startLine: contentStart + start,
+      endLine: contentStart + cursor,
+      text,
+    });
+    index = cursor + 1;
+  }
+  return units;
+}
+
+const GITHUB_FILE_TARGET_RE =
+  /(?:\$\{GITHUB_ENV\}|\$GITHUB_ENV\b|\$\{GITHUB_PATH\}|\$GITHUB_PATH\b|\$env:GITHUB_ENV\b|\$env:GITHUB_PATH\b)/;
+
+const envFileInjection = defineRule({
+  id: 'actions/env-file-injection',
+  title: 'Untrusted GitHub context is written to GITHUB_ENV or GITHUB_PATH',
+  category: 'actions',
+  severity: 'critical',
+  cwe: 'CWE-94',
+  owasp: ['A03:2021-Injection'],
+  docsUrl: DOCS + 'actionsenv-file-injection',
+  rationale:
+    'GITHUB_ENV and GITHUB_PATH are command files consumed by the runner. Writing pull request or issue controlled text there can poison later steps, alter executable resolution and bypass the shell variable separation that makes direct script interpolation safe.',
+  fix: 'Do not write attacker controlled values to runner command files. Validate them against a strict allowlist first, or pass trusted data through ordinary step outputs and env variables.',
+  appliesTo: WORKFLOW_GLOBS,
+  check(ctx) {
+    const lines = workflowLines(ctx.text);
+    const blocks = collectRunBlocks(lines);
+    const findings = [];
+
+    for (const block of blocks) {
+      for (const unit of collectShellUnits(lines, block)) {
+        const target = GITHUB_FILE_TARGET_RE.exec(unit.text);
+        if (target === null) continue;
+        const expressionRegex = /\$\{\{\s*([\s\S]*?)\s*\}\}/g;
+        let match = expressionRegex.exec(unit.text);
+        while (match !== null) {
+          const position = positionIn(unit.text, match.index);
+          const unitLines = unit.text.split('\n');
+          const lineText = unitLines[position.line - 1] ?? '';
+          if (!isCommentLine(lineText) && isUntrustedExpression(match[1])) {
+            const targetName = /GITHUB_PATH/.test(target[0]) ? 'GITHUB_PATH' : 'GITHUB_ENV';
+            const snippet = match[1].replace(/\s+/g, ' ').trim();
+            findings.push({
+              line: unit.startLine + position.line - 1,
+              column: position.column,
+              message: `Untrusted expression "\${{ ${snippet} }}" is written to ${targetName}. Runner command files must never receive pull request or issue controlled text.`,
+            });
+            break;
+          }
+          match = expressionRegex.exec(unit.text);
+        }
+      }
+    }
+    return findings;
+  },
+});
+
 export const actionRules = Object.freeze([
   scriptInjection,
   unpinnedAction,
   writeAllPermissions,
   pullRequestTargetCheckout,
+  missingPermissions,
+  envFileInjection,
 ]);

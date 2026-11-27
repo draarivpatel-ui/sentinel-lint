@@ -196,3 +196,31 @@ test('the built in pack has no external runtime dependencies', async () => {
   assert.deepEqual(manifest.dependencies, {});
   assert.deepEqual(manifest.devDependencies, {});
 });
+
+test('defineRule defaults owasp metadata to a frozen empty array', () => {
+  const rule = defineRule(base);
+  assert.deepEqual(rule.owasp, []);
+  assert.equal(Object.isFrozen(rule.owasp), true);
+});
+
+test('defineRule accepts OWASP taxonomy entries', () => {
+  const rule = defineRule({ ...base, owasp: ['A03:2021-Injection', 'LLM01:2023 Prompt Injection'] });
+  assert.deepEqual(rule.owasp, ['A03:2021-Injection', 'LLM01:2023 Prompt Injection']);
+});
+
+test('defineRule rejects non-array owasp metadata', () => {
+  assert.throws(() => defineRule({ ...base, owasp: 'A03:2021-Injection' }), RuleDefinitionError);
+});
+
+test('defineRule rejects empty owasp entries', () => {
+  assert.throws(() => defineRule({ ...base, owasp: [''] }), RuleDefinitionError);
+  assert.throws(() => defineRule({ ...base, owasp: [42] }), RuleDefinitionError);
+});
+
+test('defineRule copies owasp entries so caller mutation cannot change the rule', () => {
+  const owasp = ['A05:2021-Security Misconfiguration'];
+  const rule = defineRule({ ...base, owasp });
+  owasp.push('A03:2021-Injection');
+  assert.deepEqual(rule.owasp, ['A05:2021-Security Misconfiguration']);
+  assert.equal(Object.isFrozen(rule.owasp), true);
+});

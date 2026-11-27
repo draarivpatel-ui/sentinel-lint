@@ -56,7 +56,10 @@ maintainer account takeover followed by a retag.
 
 First-party `actions/*` and `github/*` references, local `./path` actions and
 `docker://` references are exempt. Docker references are a separate supply
-chain problem that this rule does not model.
+chain problem that this rule does not model. A narrow exception can be declared
+with the `trustedActions` config array for an owner such as `example-org` or a
+repository prefix such as `example-org/example-action`; pinning to a commit SHA
+remains the stronger default.
 
 ## actions/write-all-permissions
 
@@ -89,6 +92,213 @@ steps:
 The safe pattern is two workflows: an unprivileged `pull_request` workflow that
 builds and uploads an artifact, and a privileged `workflow_run` workflow that
 reads the artifact and never executes it.
+
+## actions/missing-permissions
+
+- Severity: warning
+- CWE: CWE-272
+- OWASP: A05:2021-Security Misconfiguration
+- Files: `.github/workflows/*.yml`, `.github/workflows/*.yaml`
+
+Flags jobs that are not covered by an explicit `permissions` block. A workflow
+level block covers every job. Without one, each job needs its own least
+privilege declaration. A step input that happens to be named `permissions` does
+not count because the reader understands workflow and job indentation.
+
+```yaml
+# finding
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+# safe
+permissions:
+  contents: read
+```
+
+The rule is a warning rather than a proof of exploitability: repository token
+defaults differ, and some repositories intentionally set them read only. The
+finding still matters because those defaults can change without a code review.
+
+## actions/env-file-injection
+
+- Severity: critical
+- CWE: CWE-94
+- OWASP: A03:2021-Injection
+- Files: workflow files and composite action metadata
+
+Flags attacker controlled GitHub expressions written to `GITHUB_ENV` or
+`GITHUB_PATH`. Those files are runner command files, not ordinary output. A
+pull request title, issue body, branch name or dispatch input written there can
+poison later steps or alter executable resolution.
+
+```yaml
+# finding
+- run: echo "TITLE=${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
+
+# safe when the value is only data for this one shell command
+- run: echo "$TITLE"
+  env:
+    TITLE: ${{ github.event.pull_request.title }}
+```
+
+The scanner keeps independent commands in one `run:` block separate. A safe
+write to `GITHUB_ENV` does not become dangerous merely because a later command
+prints untrusted text to stdout. Continuation lines, heredocs, CRLF input and
+multiline GitHub expressions are followed.
+
+## agent/bidi-unicode-override
+
+- Severity: critical
+- CWE: CWE-838
+- OWASP: LLM01:2023 Prompt Injection
+- Files: `.cursorrules`, `CLAUDE.md`, `AGENTS.md`, `SKILL.md` and `.github/copilot-instructions.md`
+
+Flags Unicode bidirectional override and isolate characters in files that AI
+coding agents read automatically. These characters can make rendered text appear
+in one order while the model reads the underlying bytes in another, the same
+Trojan Source trick that hides hostile instructions inside apparently benign
+text.
+
+The covered ranges are U+202A through U+202E and U+2066 through U+2069. Escaped
+text such as the six characters `\u202e` is not flagged; only the real control
+character is. Remove the control and rewrite the instruction plainly.
+
+## agent/invisible-zero-width-unicode
+
+- Severity: error
+- CWE: CWE-838
+- OWASP: LLM01:2023 Prompt Injection
+- Files: agent instruction files
+
+Flags invisible zero width characters U+200B through U+200F, a byte order mark
+in the middle of a file, and Unicode tag characters U+E0000 through U+E007F.
+These code points are invisible in most editors and can carry a hidden second
+instruction stream.
+
+A zero width joiner inside a recognizable emoji sequence is ignored because
+that use is visible and legitimate. A zero width joiner embedded in ordinary
+instruction text is still reported.
+
+## agent/shell-override-instruction
+
+- Severity: critical
+- CWE: CWE-829
+- OWASP: LLM01:2023 Prompt Injection
+- Files: agent instruction files
+
+Flags instructions that tell an agent to execute network content through a
+shell, such as `curl ... | sh` or `wget ... | bash`, and instructions that tell
+the agent to disable, bypass, ignore or not report security checks.
+
+Protective documentation is not the target. A sentence such as "Never run curl
+... | sh" is ignored, while an imperative instruction to run it is reported.
+Quoted shell text that only prints an example is not confused with an executable
+pipe, but a `sh -c` wrapper is.
+
+## agent/exfiltration-instruction
+
+- Severity: critical
+- CWE: CWE-200
+- OWASP: LLM01:2023 Prompt Injection
+- Files: agent instruction files
+
+Flags `curl` or `wget` instructions that upload credential references,
+environment files or SSH private keys with a data or upload flag. Examples of
+sensitive references are `$GITHUB_TOKEN`, another token or key variable,
+`.env`, `~/.ssh` and common private key file names.
+
+An authorization header used for an ordinary API request is not treated as
+exfiltration because the credential is not being uploaded as data to a collector.
+Protective warnings that tell the reader never to run the command are ignored.
+
+## container/missing-non-root-user
+
+- Severity: warning
+- CWE: CWE-250
+- OWASP: A05:2021-Security Misconfiguration
+- Files: `Dockerfile`, `Dockerfile.*` and `*.dockerfile`
+
+Flags a final image stage with no effective `USER` instruction. Multistage
+builds are resolved through named stages, so a final `FROM base` inherits a
+`USER` set in `base`. A variable such as `USER ${APP_USER}` counts as an
+explicit decision because the scanner cannot evaluate build arguments.
+
+This is a warning because an external base image can itself declare a non-root
+user. Ending the final stage with an explicit non-root user makes the runtime
+contract reviewable.
+
+## container/explicit-root-user
+
+- Severity: error
+- CWE: CWE-250
+- OWASP: A05:2021-Security Misconfiguration
+- Files: Dockerfiles
+
+Flags a final image whose effective user is `root`, uid `0` or root with an
+explicit group. Intermediate build stages may use root when the final stage
+switches back; only the runtime image is reported.
+
+## container/curl-pipe-shell
+
+- Severity: critical
+- CWE: CWE-494
+- OWASP: A08:2021-Software and Data Integrity Failures
+- Files: Dockerfiles
+
+Flags `RUN` instructions that pipe `curl` or `wget` output into `sh`, `bash` or
+another shell, including `sudo` wrappers, shell `-c` wrappers and backslash
+continuations. A quoted echo example that only prints text is not flagged.
+
+Use a pinned artifact and verify a checksum or signature before execution.
+
+## container/remote-add
+
+- Severity: warning
+- CWE: CWE-494
+- OWASP: A08:2021-Software and Data Integrity Failures
+- Files: Dockerfiles
+
+Flags `ADD http://` and `ADD https://` remote fetches without a `--checksum`.
+Remote `ADD` hides a network fetch in image metadata and historically bypasses
+the expectations reviewers have for ordinary `COPY` instructions. A checksummed
+remote artifact is accepted because its integrity is pinned.
+
+## container/privileged-mode
+
+- Severity: critical
+- CWE: CWE-250
+- OWASP: A05:2021-Security Misconfiguration
+- Files: Compose YAML files whose names contain `compose`
+
+Flags `privileged: true` in Compose services, including quoted or capitalized
+forms. Privileged mode grants broad host capabilities and device access. Use a
+specific capability or device mapping only after confirming that no narrower
+integration exists.
+
+## container/host-network
+
+- Severity: error
+- CWE: CWE-668
+- OWASP: A05:2021-Security Misconfiguration
+- Files: Compose YAML files
+
+Flags `network_mode: host`. Host networking removes the network namespace
+boundary, bypasses published port review and can expose listeners directly on
+host interfaces. Use explicit Compose networks and ports instead.
+
+## container/docker-socket-mount
+
+- Severity: critical
+- CWE: CWE-732
+- OWASP: A05:2021-Security Misconfiguration
+- Files: Compose YAML files
+
+Flags a service volume whose source is `/var/run/docker.sock`, in both short
+syntax and long `source:` syntax. The Docker socket controls the host daemon,
+so write access is effectively host root. A target path that happens to be
+`/var/run/docker.sock` without the host socket as source is not enough for a
+finding.
 
 ## mcp/plaintext-secret
 

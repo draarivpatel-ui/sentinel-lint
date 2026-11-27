@@ -346,6 +346,7 @@ async function commandRules(options, io) {
           severity: rule.severity,
           category: rule.category,
           cwe: rule.cwe,
+          owasp: [...(rule.owasp ?? [])],
           scope: rule.scope,
           docsUrl: rule.docsUrl,
         })),
@@ -379,6 +380,7 @@ const STARTER_CONFIG = {
   exclude: [],
   rules: {},
   plugins: [],
+  trustedActions: [],
 };
 
 async function commandInit(options, io) {

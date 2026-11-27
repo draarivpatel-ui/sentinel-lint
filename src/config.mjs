@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   exclude: Object.freeze([]),
   rules: Object.freeze({}),
   plugins: Object.freeze([]),
+  trustedActions: Object.freeze([]),
   maxFileSize: 1024 * 1024,
   maxFiles: 20000,
 });
@@ -31,6 +32,7 @@ const KNOWN_KEYS = new Set([
   'exclude',
   'rules',
   'plugins',
+  'trustedActions',
   'maxFileSize',
   'maxFiles',
 ]);
@@ -60,6 +62,25 @@ function validateGlobArray(value, key) {
     }
   }
   return [...value];
+}
+
+function validateTrustedActions(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ConfigError('"trustedActions" must be an array of action path prefixes');
+  }
+  const trusted = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) {
+      throw new ConfigError('"trustedActions" contains a non-string or empty action path prefix');
+    }
+    const normalized = entry.trim();
+    if (!/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){0,4}$/.test(normalized)) {
+      throw new ConfigError(`"trustedActions" entry "${normalized}" must look like owner, owner/repo or owner/repo/path`);
+    }
+    trusted.push(normalized);
+  }
+  return trusted;
 }
 
 function validatePositiveInteger(value, key, fallback) {
@@ -128,6 +149,7 @@ export function validateConfig(raw) {
     exclude,
     rules,
     plugins,
+    trustedActions: validateTrustedActions(raw.trustedActions),
     maxFileSize: validatePositiveInteger(raw.maxFileSize, 'maxFileSize', DEFAULT_CONFIG.maxFileSize),
     maxFiles: validatePositiveInteger(raw.maxFiles, 'maxFiles', DEFAULT_CONFIG.maxFiles),
   };
@@ -181,6 +203,7 @@ export async function loadConfig(options = {}) {
         exclude: [],
         rules: {},
         plugins: [],
+        trustedActions: [],
       },
       path: null,
       configDir: root,

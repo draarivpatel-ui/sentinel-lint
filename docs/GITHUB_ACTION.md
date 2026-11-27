@@ -24,7 +24,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
       - name: sentinel-lint
-        uses: draarivpatel-ui/sentinel-lint@v0.2.0
+        uses: draarivpatel-ui/sentinel-lint@v0.3.0
         with:
           path: .
           fail-on: high
@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v4
       - name: sentinel-lint
         id: sentinel
-        uses: draarivpatel-ui/sentinel-lint@v0.2.0
+        uses: draarivpatel-ui/sentinel-lint@v0.3.0
         with:
           path: .
           format: sarif
@@ -106,7 +106,7 @@ Example using outputs:
 ```yaml
 - name: sentinel-lint
   id: sentinel
-  uses: draarivpatel-ui/sentinel-lint@v0.2.0
+  uses: draarivpatel-ui/sentinel-lint@v0.3.0
   with:
     fail-on: none
 - name: print count
@@ -121,7 +121,7 @@ spaces. Flags that would override the dedicated action inputs, such as
 
 ```yaml
 - name: sentinel-lint
-  uses: draarivpatel-ui/sentinel-lint@v0.2.0
+  uses: draarivpatel-ui/sentinel-lint@v0.3.0
   with:
     args: --exclude 'generated/**' --exclude 'vendor/**' --max-findings 50
 ```

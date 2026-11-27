@@ -51,6 +51,7 @@ export function toJson(result, options = {}) {
       severity: rule.severity,
       category: rule.category,
       cwe: rule.cwe,
+      owasp: [...(rule.owasp ?? [])],
       title: rule.title,
     })),
   };

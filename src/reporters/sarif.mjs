@@ -66,14 +66,28 @@ export function fingerprintFor(finding) {
   return createHash('sha256').update(material, 'utf8').digest('hex').slice(0, 32);
 }
 
+function taxonomyTag(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function sarifRule(rule) {
+  const tags = new Set(['security', rule.category]);
+  if (rule.cwe !== null) tags.add(`cwe-${rule.cwe.slice(4).toLowerCase()}`);
+  for (const entry of rule.owasp ?? []) {
+    const tag = taxonomyTag(entry);
+    if (tag.length > 0) tags.add(`owasp-${tag}`);
+  }
+
   const descriptor = {
     id: rule.id,
     name: rule.id.replace(/[^A-Za-z0-9]+/g, '_'),
     shortDescription: { text: rule.title },
     defaultConfiguration: { level: LEVEL_BY_SEVERITY[rule.severity] ?? 'warning' },
     properties: {
-      tags: ['security', rule.category],
+      tags: [...tags],
       precision: 'high',
       'security-severity': SECURITY_SEVERITY[rule.severity] ?? '4.0',
     },
@@ -88,6 +102,7 @@ function sarifRule(rule) {
 
   if (rule.docsUrl !== null) descriptor.helpUri = rule.docsUrl;
   if (rule.cwe !== null) descriptor.properties.cwe = rule.cwe;
+  if ((rule.owasp ?? []).length > 0) descriptor.properties.owasp = [...rule.owasp];
 
   return descriptor;
 }

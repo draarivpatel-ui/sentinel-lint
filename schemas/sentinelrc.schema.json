@@ -41,6 +41,16 @@
       "items": { "type": "string", "minLength": 1 },
       "default": []
     },
+    "trustedActions": {
+      "description": "Third-party action owner or repository path prefixes trusted by actions/unpinned-action. Use sparingly; a full commit SHA is stronger.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+){0,4}$"
+      },
+      "default": []
+    },
     "maxFileSize": {
       "description": "Files larger than this many bytes are skipped.",
       "type": "integer",

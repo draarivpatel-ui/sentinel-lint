@@ -1,14 +1,14 @@
 # sentinel-lint
 
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
-Actions workflows and MCP configurations. It ships **15 security rules**, a
-stable rule API, three reporters (terminal, JSON and SARIF 2.1.0) and **382
-tests** that run on the Node.js built in test runner without installing a
-single package.
+Actions workflows, MCP configurations, AI agent instruction files and container
+builds. It ships **28 security rules**, a stable rule API, three reporters
+(terminal, JSON and SARIF 2.1.0) and **549 tests** that run on the Node.js
+built in test runner without installing a single package.
 
 ```
 $ node bin/sentinel-lint.mjs scan .
-sentinel-lint 0.2.0
+sentinel-lint 0.3.0
 scan root /home/dev/project
 
 .github/workflows/release.yml
@@ -34,9 +34,11 @@ as code:
 - **MCP manifests** are copied between machines and pasted into issues. They
   carry API keys, launch packages from the network and grant filesystem access.
 
-sentinel-lint checks both, plus the ordinary repository hygiene that precedes
-most incidents: committed credentials, dynamic code sinks, HTML sinks, shell
-injection and a missing disclosure policy.
+sentinel-lint checks both, plus three fast growing supply chain surfaces:
+AI agent instruction files that can hide Unicode or hostile commands, container
+builds that bake in privileged or unverified execution, and the ordinary
+repository hygiene that precedes most incidents: committed credentials, dynamic
+code sinks, HTML sinks, shell injection and a missing disclosure policy.
 
 ## Install and run
 
@@ -96,7 +98,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
       - name: sentinel-lint
-        uses: draarivpatel-ui/sentinel-lint@v0.2.0
+        uses: draarivpatel-ui/sentinel-lint@v0.3.0
         with:
           path: .
           fail-on: high
@@ -124,7 +126,7 @@ jobs:
         uses: actions/checkout@v4
       - name: sentinel-lint
         id: sentinel
-        uses: draarivpatel-ui/sentinel-lint@v0.2.0
+        uses: draarivpatel-ui/sentinel-lint@v0.3.0
         with:
           path: .
           format: sarif
@@ -142,11 +144,12 @@ Inputs, outputs, severity mapping, extra arguments and security details are in
 every rule under `tool.driver.rules`, maps `critical` and `error` to `error`,
 `warning` to `warning` and `info` to `note`, and gives every result a stable
 `partialFingerprints` hash that does not change when a finding moves down a
-file.
+file. Rule metadata includes CWE and OWASP taxonomy tags, precision, security
+severity, documentation links and remediation text.
 
 ## Rules
 
-All 15 rules are ordinary plugins. There is no privileged path in the engine.
+All 28 rules are ordinary plugins. There is no privileged path in the engine.
 
 | Rule | Severity | Catches |
 | ---- | -------- | ------- |
@@ -154,6 +157,19 @@ All 15 rules are ordinary plugins. There is no privileged path in the engine.
 | `actions/unpinned-action` | warning | Third-party action on a mutable tag or branch |
 | `actions/write-all-permissions` | error | Workflow grants `write-all` token permissions |
 | `actions/pull-request-target-checkout` | critical | `pull_request_target` checks out fork code |
+| `actions/missing-permissions` | warning | Job not covered by explicit token permissions |
+| `actions/env-file-injection` | critical | Untrusted context written to `GITHUB_ENV` or `GITHUB_PATH` |
+| `agent/bidi-unicode-override` | critical | Trojan Source bidirectional Unicode in agent instructions |
+| `agent/invisible-zero-width-unicode` | error | Zero width, BOM and tag characters in agent instructions |
+| `agent/shell-override-instruction` | critical | Remote shell installer or security review override instructions |
+| `agent/exfiltration-instruction` | critical | Instructions to upload tokens, `.env` or SSH keys |
+| `container/missing-non-root-user` | warning | Final image stage has no non-root `USER` |
+| `container/explicit-root-user` | error | Final image explicitly runs as root |
+| `container/curl-pipe-shell` | critical | `RUN` pipes `curl` or `wget` into a shell |
+| `container/remote-add` | warning | Remote `ADD` without checksum verification |
+| `container/privileged-mode` | critical | Compose service sets `privileged: true` |
+| `container/host-network` | error | Compose service uses `network_mode: host` |
+| `container/docker-socket-mount` | critical | Compose service mounts `/var/run/docker.sock` |
 | `mcp/plaintext-secret` | critical | Literal credential in an MCP manifest |
 | `mcp/unpinned-npx-package` | warning | `npx` package without an exact version |
 | `mcp/shell-metacharacter-arg` | error | Server argument a shell would interpret |
@@ -183,6 +199,7 @@ commas are accepted.
     "actions/unpinned-action": "error"
   },
   "plugins": ["./tools/sentinel/team-rules.mjs"],
+  "trustedActions": ["example-org/example-action"],
   "maxFileSize": 1048576,
   "maxFiles": 20000
 }
@@ -190,7 +207,10 @@ commas are accepted.
 
 Rule values are `info`, `warning`, `error`, `critical` or `off`. Unknown rule
 ids and unknown top level keys produce diagnostics instead of being ignored
-silently.
+silently. `trustedActions` is a narrow owner or repository prefix allowlist for
+`actions/unpinned-action`; prefer a full commit SHA and use the allowlist only
+for a deliberate exception. Setting the rule itself to `off` remains the broad
+opt out.
 
 ## Inline suppression
 
@@ -246,7 +266,7 @@ module stored elsewhere; paths named on the command line are not restricted.
 import { scan, formatSarif } from 'sentinel-lint';
 
 const result = await scan({ root: process.cwd() });
-process.stdout.write(formatSarif(result, { version: '0.2.0' }));
+process.stdout.write(formatSarif(result, { version: '0.3.0' }));
 ```
 
 `scan` never throws for a rule failure. A rule that crashes or returns junk
@@ -263,7 +283,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-npm test          # 382 tests, no install step
+npm test          # 549 tests, no install step
 npm run self-scan # self scan
 ```
 

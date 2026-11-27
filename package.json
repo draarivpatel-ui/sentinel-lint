@@ -1,7 +1,7 @@
 {
   "name": "sentinel-lint",
-  "version": "0.2.0",
-  "description": "Plugin-first, zero-dependency security policy linter and SARIF 2.1.0 scanner for repositories, GitHub Actions workflows and MCP configurations.",
+  "version": "0.3.0",
+  "description": "Plugin-first, zero-dependency security policy linter and SARIF 2.1.0 scanner for repositories, GitHub Actions, MCP configurations, AI agent instructions and containers.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/draarivpatel-ui/sentinel-lint.git"
@@ -55,7 +55,11 @@
     "supply-chain",
     "zero-dependencies",
     "plugin-system",
-    "code-scanning"
+    "code-scanning",
+    "prompt-injection",
+    "ai-security",
+    "docker",
+    "container-security"
   ],
   "dependencies": {},
   "devDependencies": {},

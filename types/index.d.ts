@@ -1,5 +1,5 @@
 /**
- * Type definitions for sentinel-lint 0.2.0.
+ * Type definitions for sentinel-lint 0.3.0.
  *
  * The package ships no JavaScript build step, so these declarations are the
  * contract for editor and TypeScript consumers. They are hand maintained and
@@ -66,6 +66,7 @@ export interface FileRuleContext {
   lines: string[];
   lineCount: number;
   root: string;
+  config: Readonly<SentinelConfig>;
   report: (...args: ReportArgument) => void;
 }
 
@@ -76,6 +77,7 @@ export interface RepoRuleContext {
   lines: never[];
   lineCount: 0;
   root: string;
+  config: Readonly<SentinelConfig>;
   files: ScannedFile[];
   paths: string[];
   read(filePath: string): string | null;
@@ -90,6 +92,7 @@ export interface RuleDescriptor {
   severity: Severity;
   category?: string;
   cwe?: string;
+  owasp?: string[];
   docsUrl?: string;
   rationale?: string;
   fix?: string;
@@ -106,6 +109,7 @@ export interface Rule {
   readonly category: string;
   readonly scope: RuleScope;
   readonly cwe: string | null;
+  readonly owasp: readonly string[];
   readonly docsUrl: string | null;
   readonly rationale: string;
   readonly fix: string | null;
@@ -120,6 +124,7 @@ export interface SentinelConfig {
   exclude: string[];
   rules: Record<string, Severity | 'off'>;
   plugins: string[];
+  trustedActions: string[];
   maxFileSize: number;
   maxFiles: number;
 }
@@ -131,6 +136,7 @@ export interface RawConfig {
   exclude?: string[];
   rules?: Record<string, Severity | 'off'>;
   plugins?: string[];
+  trustedActions?: string[];
   maxFileSize?: number;
   maxFiles?: number;
 }

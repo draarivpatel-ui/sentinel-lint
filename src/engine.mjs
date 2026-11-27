@@ -267,6 +267,7 @@ export async function scan(options = {}) {
         lines: [],
         lineCount: 0,
         root: walked.root,
+        config,
         files: walked.files,
         paths: walked.files.map((file) => file.path),
         read: (filePath) => {
@@ -308,6 +309,7 @@ export async function scan(options = {}) {
         lines: linesFor(file),
         lineCount: linesFor(file).length,
         root: walked.root,
+        config,
         report: () => {},
       };
       runRuleCheck(rule, ctx, file);

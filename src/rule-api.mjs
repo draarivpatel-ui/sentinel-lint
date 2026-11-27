@@ -66,6 +66,7 @@ export function meetsThreshold(severity, threshold) {
  * @param {string} descriptor.severity One of info, warning, error, critical.
  * @param {string} [descriptor.category] Defaults to the id prefix.
  * @param {string} [descriptor.cwe] Optional CWE identifier, for example "CWE-798".
+ * @param {string[]} [descriptor.owasp] Optional OWASP taxonomy labels for SARIF metadata.
  * @param {string} [descriptor.docsUrl] Absolute or repository relative docs link.
  * @param {string} [descriptor.rationale] Why the rule exists, used in SARIF.
  * @param {string} [descriptor.fix] Actionable remediation text.
@@ -111,6 +112,22 @@ export function defineRule(descriptor) {
     (typeof descriptor.cwe !== 'string' || !CWE_PATTERN.test(descriptor.cwe))
   ) {
     throw new RuleDefinitionError(`rule "${id}" has an invalid cwe value; expected the form CWE-798`);
+  }
+
+  let owasp = [];
+  if (descriptor.owasp !== undefined && descriptor.owasp !== null) {
+    if (!Array.isArray(descriptor.owasp)) {
+      throw new RuleDefinitionError(`rule "${id}" has an invalid owasp value; expected an array of strings`);
+    }
+    for (const entry of descriptor.owasp) {
+      if (typeof entry !== 'string' || entry.trim().length === 0) {
+        throw new RuleDefinitionError(`rule "${id}" has a non-string or empty OWASP taxonomy entry`);
+      }
+      if (/[\u0000-\u001f\u007f]/.test(entry)) {
+        throw new RuleDefinitionError(`rule "${id}" has a control character in an OWASP taxonomy entry`);
+      }
+      owasp.push(entry.trim());
+    }
   }
 
   if (
@@ -170,6 +187,7 @@ export function defineRule(descriptor) {
     category,
     scope,
     cwe: descriptor.cwe ?? null,
+    owasp: Object.freeze(owasp),
     docsUrl: descriptor.docsUrl ?? null,
     rationale: descriptor.rationale ?? '',
     fix: descriptor.fix ?? null,
