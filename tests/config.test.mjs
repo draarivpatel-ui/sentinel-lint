@@ -213,6 +213,24 @@ test('validateConfig rejects tags digests and whitespace in trustedNonRootImages
   assert.throws(() => validateConfig({ trustedNonRootImages: ['images.example.com/team runtime'] }), ConfigError);
 });
 
+test('validateConfig rejects uppercase malformed or escaping trustedNonRootImages prefixes', () => {
+  assert.throws(() => validateConfig({ trustedNonRootImages: ['Images.example.com/team/'] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedNonRootImages: ['images.example.com/team/../evil'] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedNonRootImages: ['images.example.com//team/'] }), ConfigError);
+});
+
+test('validateConfig accepts and normalizes trusted artifact-only scratch stages', () => {
+  const { config, warnings } = validateConfig({ trustedArtifactOnlyScratchStages: ['Artifacts', 'export-bin'] });
+  assert.deepEqual(config.trustedArtifactOnlyScratchStages, ['artifacts', 'export-bin']);
+  assert.deepEqual(warnings, []);
+});
+
+test('validateConfig rejects malformed trusted artifact-only scratch stages', () => {
+  assert.throws(() => validateConfig({ trustedArtifactOnlyScratchStages: 'artifacts' }), ConfigError);
+  assert.throws(() => validateConfig({ trustedArtifactOnlyScratchStages: ['bad/name'] }), ConfigError);
+  assert.throws(() => validateConfig({ trustedArtifactOnlyScratchStages: [42] }), ConfigError);
+});
+
 test('loadConfig reads trustedNonRootImages from the scan root config', async (t) => {
   const root = await makeTree(t, {
     [CONFIG_FILE]: '{"trustedNonRootImages": ["images.example.com/team/"]}\n',

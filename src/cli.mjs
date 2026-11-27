@@ -382,6 +382,7 @@ const STARTER_CONFIG = {
   plugins: [],
   trustedActions: [],
   trustedNonRootImages: [],
+  trustedArtifactOnlyScratchStages: [],
 };
 
 async function commandInit(options, io) {

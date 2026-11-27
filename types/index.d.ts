@@ -129,6 +129,7 @@ export interface SentinelConfig {
   plugins: string[];
   trustedActions: string[];
   trustedNonRootImages: string[];
+  trustedArtifactOnlyScratchStages: string[];
   maxFileSize: number;
   maxFiles: number;
 }
@@ -142,6 +143,7 @@ export interface RawConfig {
   plugins?: string[];
   trustedActions?: string[];
   trustedNonRootImages?: string[];
+  trustedArtifactOnlyScratchStages?: string[];
   maxFileSize?: number;
   maxFiles?: number;
 }

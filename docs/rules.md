@@ -63,15 +63,22 @@ for an owner such as `example-org` or a repository prefix such as
 default.
 
 During a directory scan the rule also reads `.github/workflows/actions.lock`
-when it is present. For lockfile schema `v0.0.3`, the scanner uses the
-`workflows` dependency lists and the `dependencies` commit metadata offline.
-A visible tag is accepted only when the exact workflow path is onboarded, the
-exact dependency key is listed there and that dependency records a `sha1-`
-commit followed by 40 hexadecimal characters. Owner and repository casing is
-canonicalized, while ref spelling and action path casing stay significant. If
-the lockfile is absent, incomplete or invalid for that dependency, the warning
-remains and reports that the action is not commit-pinned in the workflow or
-lockfile.
+when it is present. For lockfile schema `v0.0.3`, the scanner validates the
+supported schema before trusting it: only the documented sections and fields,
+no duplicate canonical keys or repeated sections, required `ref`, `commit`,
+`owner_id` and `repo_id` fields with the correct types, valid dependency pins,
+consistent ref and commit metadata, complete workflow and uses-graph
+references, and no uses cycles. The complete YAML `uses:` scalar is decoded
+before comparison, so quoted values cannot hide a different dependency.
+
+A visible tag is accepted only for an eligible `.github/workflows/*.yml` or
+`.github/workflows/*.yaml` file when that exact workflow path is onboarded,
+the exact dependency key is listed there and the dependency records a valid
+algorithm-prefixed hexadecimal commit. Composite action metadata never receives
+lockfile suppression. Owner and repository casing is canonicalized, while ref
+spelling and action path casing stay significant. If the lockfile is absent,
+incomplete, stale or malformed for any part of the schema, the warning remains
+and reports that the action is not commit-pinned in the workflow or lockfile.
 
 ## actions/write-all-permissions
 
@@ -236,18 +243,23 @@ builds are resolved through named stages, so a final `FROM base` inherits a
 `USER` set in `base`. A variable such as `USER ${APP_USER}` counts as an
 explicit decision because the scanner cannot evaluate build arguments.
 
-A final `FROM scratch` stage with no `ENTRYPOINT`, `CMD` or `RUN` is treated
-as an artifact-only export rather than a runtime image. A scratch stage that
-declares an entrypoint, command or build command is still evaluated. The
-artifact-only suppression never applies to `container/explicit-root-user`.
+A final literal `FROM scratch` stage is treated as artifact-only only when its
+exact stage alias is listed in `trustedArtifactOnlyScratchStages`, it contains
+a cross-stage `COPY`, and every instruction is limited to file transfer or
+non-runtime metadata. `ENTRYPOINT`, `CMD`, `RUN`, `HEALTHCHECK`, `ONBUILD`,
+`SHELL`, and other runtime-oriented instructions keep the finding. A normally
+named final stage never receives the literal-scratch shortcut. The artifact
+suppression never applies to `container/explicit-root-user`.
 
 The rule also recognizes a narrow external non-root contract: the image must
-be under the built in `gcr.io/distroless/` prefix or a repository prefix in
-the `trustedNonRootImages` config array, and its tag must contain `nonroot` as
-a whole component when split on hyphens, underscores and dots. A digest is
-stripped before the tag is read. A random image whose tag merely contains the
-letters `nonroot` is still flagged. Ending the final stage with an explicit
-non-root user remains the most reviewable contract.
+be exactly the configured repository, or below a configured namespace prefix
+ending in `/`, or under the built in `gcr.io/distroless/` prefix. Its tag must
+contain lowercase `nonroot` as a whole component when split on hyphens,
+underscores and dots; Docker tags are case sensitive. When a reference includes
+a digest, the digest selects the image and tag inference is never trusted. A
+random image whose tag merely contains the letters `nonroot` is still flagged.
+Ending the final stage with an explicit non-root user remains the most
+reviewable contract.
 
 ## container/explicit-root-user
 

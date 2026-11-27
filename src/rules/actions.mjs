@@ -264,11 +264,14 @@ const scriptInjection = defineRule({
 export function parseUses(line) {
   // YAML also accepts `uses :` and a quoted key; both resolve to the same
   // step field at runtime, so an unpinned action must not slip past here.
-  const match = /^[ \t]*(?:-[ \t]+)?(?:(['"])uses\1|uses)[ \t]*:[ \t]*(['"]?)([^'"\s#]+)\2/.exec(
-    line,
-  );
+  const match = /^[ \t]*(?:-[ \t]+)?(?:(['"])uses\1|uses)[ \t]*:([ \t]*)(.*)$/.exec(line);
   if (match === null) return null;
-  return { spec: match[3], column: match[0].indexOf(match[3]) + 1 };
+  const rawValue = stripNodeProperties(match[3] ?? '');
+  const spec = yamlScalar(rawValue);
+  if (typeof spec !== 'string' || spec.length === 0) return null;
+  const rawScalar = stripYamlComment(match[3]).trimStart();
+  const quotedOffset = rawScalar.startsWith('"') || rawScalar.startsWith("'") ? 1 : 0;
+  return { spec, column: match[0].length - match[3].length + 1 + quotedOffset };
 }
 
 export function isPinnedActionRef(ref) {
@@ -291,7 +294,7 @@ function isTrustedActionPath(pathPart, trustedActions) {
 }
 
 const ACTIONS_LOCK_PATH = '.github/workflows/actions.lock';
-const LOCKFILE_COMMIT_RE = /^sha1-[0-9a-fA-F]{40}$/;
+const LOCKFILE_COMMIT_RE = /^(?:sha1-[0-9a-fA-F]{40}|sha256-[0-9a-fA-F]{64})$/;
 
 function stripYamlComment(text) {
   let quote = null;
@@ -340,15 +343,31 @@ function yamlScalar(raw) {
       return null;
     }
   }
+  if (value[0] === "'" || value[0] === '"') return null;
   return value;
 }
 
-function splitYamlMapping(line) {
-  const indent = leadingIndent(line);
+function typedYamlScalar(raw) {
+  const value = stripYamlComment(String(raw)).trim();
+  if (value.length === 0) return { kind: 'string', value: '' };
+  if (value[0] === "'" || value[0] === '"') {
+    const decoded = yamlScalar(value);
+    return decoded === null ? null : { kind: 'string', value: decoded };
+  }
+  if (/^-?(?:0|[1-9][0-9]*)$/.test(value)) {
+    const number = Number(value);
+    if (Number.isSafeInteger(number)) return { kind: 'number', value: number };
+  }
+  if (value === 'true' || value === 'false') return { kind: 'boolean', value: value === 'true' };
+  if (value === 'null' || value === '~') return { kind: 'null', value: null };
+  return { kind: 'string', value };
+}
+
+function splitYamlMappingContent(content) {
   let quote = null;
   let escaped = false;
-  for (let index = indent; index < line.length; index += 1) {
-    const char = line[index];
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
     if (quote !== null) {
       if (escaped) {
         escaped = false;
@@ -359,7 +378,7 @@ function splitYamlMapping(line) {
         continue;
       }
       if (char === quote) {
-        if (quote === "'" && line[index + 1] === "'") {
+        if (quote === "'" && content[index + 1] === "'") {
           index += 1;
         } else {
           quote = null;
@@ -371,28 +390,19 @@ function splitYamlMapping(line) {
       quote = char;
       continue;
     }
-    if (char === ':' && (index + 1 === line.length || /\s/.test(line[index + 1]))) {
-      return {
-        indent,
-        key: yamlScalar(line.slice(indent, index)),
-        rawValue: line.slice(index + 1),
-      };
+    if (char === ':' && (index + 1 === content.length || /\s/.test(content[index + 1]))) {
+      return { keyRaw: content.slice(0, index), rawValue: content.slice(index + 1) };
     }
   }
   return null;
 }
 
-function yamlListItem(line) {
-  const match = /^[ \t]*-[ \t]+(.*)$/.exec(line);
-  return match === null ? null : yamlScalar(match[1]);
-}
-
 function parseYamlFlowSequence(raw) {
-  const value = stripYamlComment(String(raw)).trim();
-  if (!value.startsWith('[') || !value.endsWith(']')) return null;
+  const value = String(raw).trim();
+  if (!value.startsWith('[') || !value.endsWith(']')) return undefined;
   const inner = value.slice(1, -1).trim();
-  if (inner === '') return [];
   const items = [];
+  if (inner === '') return { type: 'seq', items };
   let start = 0;
   let quote = null;
   let escaped = false;
@@ -421,18 +431,103 @@ function parseYamlFlowSequence(raw) {
       quote = char;
       continue;
     }
+    if (!atEnd && (char === '[' || char === ']' || char === '{' || char === '}')) return undefined;
     if (atEnd || char === ',') {
-      const item = yamlScalar(inner.slice(start, index));
-      if (item === null) return null;
-      items.push(item);
+      const scalar = typedYamlScalar(inner.slice(start, index).trim());
+      if (scalar === null) return undefined;
+      items.push({ type: 'scalar', ...scalar });
       start = index + 1;
     }
   }
-  return items;
+  return { type: 'seq', items };
+}
+
+function parseInlineYamlValue(raw) {
+  const value = String(raw).trim();
+  if (value === '{}') return { type: 'map', entries: new Map() };
+  if (value.startsWith('[')) return parseYamlFlowSequence(value);
+  if (value.startsWith('{') || value.startsWith('&') || value.startsWith('!') || value.startsWith('*')) return undefined;
+  const scalar = typedYamlScalar(value);
+  return scalar === null ? undefined : { type: 'scalar', ...scalar };
+}
+
+function isSequenceLine(content) {
+  return content === '-' || /^-[ \t]+/.test(content);
+}
+
+function parseYamlSubset(text) {
+  const lines = [];
+  for (const rawLine of workflowLines(text)) {
+    if (/^[ \t]*\t/.test(rawLine)) return null;
+    const withoutComment = stripYamlComment(rawLine).replace(/[ \t]+$/u, '');
+    if (withoutComment.trim() === '') continue;
+    const indent = leadingIndent(withoutComment);
+    lines.push({ indent, content: withoutComment.slice(indent) });
+  }
+  if (lines.length === 0) return null;
+
+  let index = 0;
+
+  function parseBlock(indent) {
+    if (index >= lines.length || lines[index].indent !== indent) return undefined;
+    return isSequenceLine(lines[index].content) ? parseSequence(indent) : parseMapping(indent);
+  }
+
+  function parseMapping(indent) {
+    const entries = new Map();
+    while (index < lines.length) {
+      const line = lines[index];
+      if (line.indent < indent) break;
+      if (line.indent > indent || isSequenceLine(line.content)) return undefined;
+      const mapping = splitYamlMappingContent(line.content);
+      if (mapping === null) return undefined;
+      const key = typedYamlScalar(mapping.keyRaw);
+      if (key === null || key.kind !== 'string' || key.value === '' || entries.has(key.value)) return undefined;
+      index += 1;
+      let value;
+      if (mapping.rawValue.trim() !== '') {
+        value = parseInlineYamlValue(mapping.rawValue);
+      } else if (index < lines.length && lines[index].indent > indent) {
+        value = parseBlock(lines[index].indent);
+      } else {
+        value = { type: 'scalar', kind: 'null', value: null };
+      }
+      if (value === undefined) return undefined;
+      entries.set(key.value, value);
+    }
+    return { type: 'map', entries };
+  }
+
+  function parseSequence(indent) {
+    const items = [];
+    while (index < lines.length) {
+      const line = lines[index];
+      if (line.indent < indent) break;
+      if (line.indent > indent) return undefined;
+      if (!isSequenceLine(line.content)) break;
+      const rest = line.content === '-' ? '' : line.content.replace(/^-[ \t]+/, '');
+      index += 1;
+      let value;
+      if (rest.trim() !== '') {
+        value = parseInlineYamlValue(rest);
+      } else if (index < lines.length && lines[index].indent > indent) {
+        value = parseBlock(lines[index].indent);
+      } else {
+        value = { type: 'scalar', kind: 'null', value: null };
+      }
+      if (value === undefined) return undefined;
+      items.push(value);
+    }
+    return { type: 'seq', items };
+  }
+
+  const root = parseBlock(lines[0].indent);
+  if (root === undefined || index !== lines.length) return null;
+  return root;
 }
 
 function canonicalActionKey(spec) {
-  const at = spec.lastIndexOf('@');
+  const at = spec.indexOf('@');
   const pathPart = at === -1 ? spec : spec.slice(0, at);
   const ref = at === -1 ? null : spec.slice(at + 1);
   const parts = pathPart.split('/');
@@ -441,73 +536,157 @@ function canonicalActionKey(spec) {
   return `${parts.join('/')}${ref === null ? '' : `@${ref}`}`;
 }
 
+function parseLockPin(value) {
+  if (typeof value !== 'string' || value.length === 0 || /[\s\u0000-\u001f\u007f]/u.test(value)) return null;
+  const at = value.indexOf('@');
+  if (at <= 0 || at === value.length - 1) return null;
+  const repoPath = value.slice(0, at);
+  const ref = value.slice(at + 1);
+  const parts = repoPath.split('/');
+  if (parts.length !== 2 || ref.includes(':')) return null;
+  if (!/^[A-Za-z0-9_.-]+$/.test(parts[0]) || !/^[A-Za-z0-9_.-]+$/.test(parts[1])) return null;
+  if (parts[0] === '.' || parts[0] === '..' || parts[1] === '.' || parts[1] === '..') return null;
+  const owner = parts[0].toLowerCase();
+  const repo = parts[1].toLowerCase();
+  return { canonical: `${owner}/${repo}@${ref}`, ref };
+}
+
+function scalarNode(node, kind) {
+  return node !== undefined && node !== null && node.type === 'scalar' && node.kind === kind ? node : null;
+}
+
+function stringNode(node) {
+  const scalar = scalarNode(node, 'string');
+  return scalar === null || scalar.value.length === 0 ? null : scalar.value;
+}
+
+function positiveIntegerNode(node) {
+  const scalar = scalarNode(node, 'number');
+  return scalar !== null && Number.isInteger(scalar.value) && scalar.value > 0 ? scalar.value : null;
+}
+
+function isSafeLockWorkflowPath(filePath) {
+  if (typeof filePath !== 'string' || filePath.length === 0 || filePath.startsWith('/')) return false;
+  if (/[\u0000-\u001f\u007f\\:]/u.test(filePath)) return false;
+  return !filePath.split('/').includes('..');
+}
+
+function isEligibleLockWorkflowPath(filePath) {
+  return /^\.github\/workflows\/[^/]+\.(?:yml|yaml)$/.test(filePath);
+}
+
+function validAlgoHexCommit(value) {
+  return LOCKFILE_COMMIT_RE.test(value);
+}
+
+function canonicalSequencePins(node) {
+  if (node === undefined || node.type !== 'seq') return null;
+  const pins = [];
+  const seen = new Set();
+  for (const item of node.items) {
+    const value = stringNode(item);
+    const pin = value === null ? null : parseLockPin(value);
+    if (pin === null || seen.has(pin.canonical)) return null;
+    seen.add(pin.canonical);
+    pins.push(pin.canonical);
+  }
+  return pins;
+}
+
+function invalidActionsLock() {
+  return { version: null, workflows: new Map(), dependencies: new Map(), valid: false };
+}
+
 export function parseActionsLock(text) {
+  const invalid = invalidActionsLock();
+  if (typeof text !== 'string' || text.length > 1024 * 1024) return invalid;
+  const root = parseYamlSubset(text);
+  if (root === null || root.type !== 'map') return invalid;
+
+  for (const key of root.entries.keys()) {
+    if (key !== 'version' && key !== 'workflows' && key !== 'dependencies') return invalid;
+  }
+  const version = stringNode(root.entries.get('version'));
+  if (version !== 'v0.0.3') return invalid;
+
   const workflows = new Map();
-  const dependencies = new Map();
-  let version = null;
-  let section = null;
-  let currentWorkflow = null;
-  let currentWorkflowIndent = -1;
-  let currentDependency = null;
-  let currentDependencyIndent = -1;
-
-  for (const line of workflowLines(text)) {
-    if (line.trim() === '' || isCommentLine(line)) continue;
-    const indent = leadingIndent(line);
-    if (indent === 0) {
-      const mapping = splitYamlMapping(line);
-      if (mapping !== null && mapping.key === 'version') {
-        version = yamlScalar(mapping.rawValue);
-      }
-      section = mapping !== null && mapping.key === 'workflows'
-        ? 'workflows'
-        : mapping !== null && mapping.key === 'dependencies'
-          ? 'dependencies'
-          : null;
-      currentWorkflow = null;
-      currentWorkflowIndent = -1;
-      currentDependency = null;
-      currentDependencyIndent = -1;
-      continue;
-    }
-
-    if (section === 'workflows') {
-      const item = yamlListItem(line);
-      if (item !== null && currentWorkflow !== null && indent > currentWorkflowIndent) {
-        if (item.length > 0) workflows.get(currentWorkflow).push(canonicalActionKey(item));
-        continue;
-      }
-      const mapping = splitYamlMapping(line);
-      if (mapping === null || mapping.key === null || mapping.key === '') continue;
-      const sequence = parseYamlFlowSequence(mapping.rawValue);
-      const entries = sequence === null ? [] : sequence.filter((entry) => entry.length > 0).map(canonicalActionKey);
-      workflows.set(mapping.key, entries);
-      currentWorkflow = mapping.key;
-      currentWorkflowIndent = mapping.indent;
-      continue;
-    }
-
-    if (section === 'dependencies') {
-      const mapping = splitYamlMapping(line);
-      if (mapping === null || mapping.key === null || mapping.key === '') continue;
-      const value = stripYamlComment(mapping.rawValue).trim();
-      if (value === '') {
-        currentDependency = canonicalActionKey(mapping.key);
-        currentDependencyIndent = mapping.indent;
-        if (!dependencies.has(currentDependency)) dependencies.set(currentDependency, { commit: null });
-        continue;
-      }
-      if (
-        currentDependency !== null &&
-        indent > currentDependencyIndent &&
-        mapping.key === 'commit'
-      ) {
-        dependencies.get(currentDependency).commit = yamlScalar(mapping.rawValue);
-      }
+  const workflowsNode = root.entries.get('workflows');
+  if (workflowsNode !== undefined) {
+    if (workflowsNode.type !== 'map') return invalid;
+    for (const [workflowPath, listNode] of workflowsNode.entries) {
+      if (!isSafeLockWorkflowPath(workflowPath)) return invalid;
+      const pins = canonicalSequencePins(listNode);
+      if (pins === null) return invalid;
+      workflows.set(workflowPath, pins);
     }
   }
 
-  return { version, workflows, dependencies };
+  const dependencies = new Map();
+  const dependenciesNode = root.entries.get('dependencies');
+  if (dependenciesNode !== undefined) {
+    if (dependenciesNode.type !== 'map') return invalid;
+    for (const [rawKey, actionNode] of dependenciesNode.entries) {
+      const pin = parseLockPin(rawKey);
+      if (pin === null || actionNode.type !== 'map' || dependencies.has(pin.canonical)) return invalid;
+      const allowed = new Set(['hostname', 'ref', 'commit', 'owner_id', 'repo_id', 'uses']);
+      for (const field of actionNode.entries.keys()) {
+        if (!allowed.has(field)) return invalid;
+      }
+      const ref = stringNode(actionNode.entries.get('ref'));
+      const commit = stringNode(actionNode.entries.get('commit'));
+      const ownerId = positiveIntegerNode(actionNode.entries.get('owner_id'));
+      const repoId = positiveIntegerNode(actionNode.entries.get('repo_id'));
+      if (ref === null || commit === null || ownerId === null || repoId === null || !validAlgoHexCommit(commit)) return invalid;
+      const hostnameNode = actionNode.entries.get('hostname');
+      let hostname = null;
+      if (hostnameNode !== undefined) {
+        hostname = stringNode(hostnameNode);
+        if (hostname === null || !/^(github\.com|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.ghe\.com)$/.test(hostname)) return invalid;
+      }
+      const usesNode = actionNode.entries.get('uses');
+      let uses = [];
+      if (usesNode !== undefined) {
+        uses = canonicalSequencePins(usesNode);
+        if (uses === null) return invalid;
+      }
+      const fullSha = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(pin.ref);
+      if (!fullSha && ref !== pin.ref) return invalid;
+      if (fullSha) {
+        const digest = commit.slice(commit.indexOf('-') + 1).toLowerCase();
+        if (digest !== pin.ref.toLowerCase()) return invalid;
+      }
+      dependencies.set(pin.canonical, { ref, commit, ownerId, repoId, hostname, uses });
+    }
+  }
+
+  for (const pins of workflows.values()) {
+    for (const pin of pins) {
+      if (!dependencies.has(pin)) return invalid;
+    }
+  }
+  for (const action of dependencies.values()) {
+    for (const pin of action.uses) {
+      if (!dependencies.has(pin)) return invalid;
+    }
+  }
+
+  const color = new Map();
+  function hasCycle(key) {
+    if (color.get(key) === 1) return true;
+    if (color.get(key) === 2) return false;
+    color.set(key, 1);
+    const action = dependencies.get(key);
+    for (const next of action === undefined ? [] : action.uses) {
+      if (hasCycle(next)) return true;
+    }
+    color.set(key, 2);
+    return false;
+  }
+  for (const key of dependencies.keys()) {
+    if (hasCycle(key)) return invalid;
+  }
+
+  return { version, workflows, dependencies, valid: true };
 }
 
 const actionsLockCache = new WeakMap();
@@ -532,7 +711,7 @@ function readActionsLock(ctx) {
 }
 
 function isPinnedByActionsLock(spec, workflowPath, lock) {
-  if (lock === null || lock.version !== 'v0.0.3') return false;
+  if (lock === null || lock.valid !== true || !isEligibleLockWorkflowPath(workflowPath)) return false;
   const key = canonicalActionKey(spec);
   const workflowEntries = lock.workflows.get(workflowPath);
   if (!Array.isArray(workflowEntries) || !workflowEntries.includes(key)) return false;

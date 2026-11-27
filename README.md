@@ -5,7 +5,7 @@
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows, MCP configurations, AI agent instruction files and container
 builds. It ships **28 security rules**, a stable rule API, three reporters
-(terminal, JSON and SARIF 2.1.0) and **584 tests** that run on the Node.js
+(terminal, JSON and SARIF 2.1.0) and **608 tests** that run on the Node.js
 built in test runner without installing a single package.
 
 ```
@@ -203,6 +203,7 @@ commas are accepted.
   "plugins": ["./tools/sentinel/team-rules.mjs"],
   "trustedActions": ["example-org/example-action"],
   "trustedNonRootImages": ["images.example.com/team/"],
+  "trustedArtifactOnlyScratchStages": ["artifacts"],
   "maxFileSize": 1048576,
   "maxFiles": 20000
 }
@@ -214,9 +215,14 @@ silently. `trustedActions` is a narrow owner or repository prefix allowlist for
 `actions/unpinned-action`; prefer a full commit SHA and use the allowlist only
 for a deliberate exception. `trustedNonRootImages` is the matching deliberate
 exception list for image families whose documented tag contract runs without
-root; the built in distroless prefix is already recognized and every tag still
-needs `nonroot` as a whole component. Setting a rule itself to `off` remains
-the broad opt out.
+root. Entries are exact repositories, or namespaces only when they end in `/`,
+and Docker tags remain case sensitive. The built in distroless prefix is
+already recognized and every tag still needs lowercase `nonroot` as a whole
+component. Tag inference never applies when a digest selects the image.
+`trustedArtifactOnlyScratchStages` is the explicit opt in for final scratch
+stages that are only artifact exports; it names exact stage aliases and still
+requires file-transfer-only content with a cross-stage copy. Setting a rule
+itself to `off` remains the broad opt out.
 
 ## Inline suppression
 
@@ -289,7 +295,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-npm test          # 584 tests, no install step
+npm test          # 608 tests, no install step
 npm run self-scan # self scan
 npm ci            # only needed before fuzzing in a fresh checkout
 npm run test:fuzz # fast-check property tests

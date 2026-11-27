@@ -9,6 +9,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { assertValidGlob } from './globs.mjs';
+import { isValidImageRepositoryPrefix } from './image-ref.mjs';
 import { jsonToValue, parseJsonDocument, JsonDocumentError } from './json-pos.mjs';
 import { SEVERITIES } from './rule-api.mjs';
 
@@ -22,6 +23,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   plugins: Object.freeze([]),
   trustedActions: Object.freeze([]),
   trustedNonRootImages: Object.freeze([]),
+  trustedArtifactOnlyScratchStages: Object.freeze([]),
   maxFileSize: 1024 * 1024,
   maxFiles: 20000,
 });
@@ -35,6 +37,7 @@ const KNOWN_KEYS = new Set([
   'plugins',
   'trustedActions',
   'trustedNonRootImages',
+  'trustedArtifactOnlyScratchStages',
   'maxFileSize',
   'maxFiles',
 ]);
@@ -96,14 +99,27 @@ function validateTrustedNonRootImages(value) {
       throw new ConfigError('"trustedNonRootImages" contains a non-string or empty image repository prefix');
     }
     const normalized = entry.trim();
-    const lastSlash = normalized.lastIndexOf('/');
-    const lastColon = normalized.lastIndexOf(':');
-    if (/\s/.test(normalized) || normalized.includes('@') || lastColon > lastSlash) {
+    if (!isValidImageRepositoryPrefix(normalized)) {
       throw new ConfigError(
-        `"trustedNonRootImages" entry "${normalized}" must be an image repository prefix without whitespace, a tag or a digest`,
+        `"trustedNonRootImages" entry "${normalized}" must be a valid lowercase image repository or namespace prefix without whitespace, a tag or a digest`,
       );
     }
     trusted.push(normalized);
+  }
+  return trusted;
+}
+
+function validateTrustedArtifactOnlyScratchStages(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new ConfigError('"trustedArtifactOnlyScratchStages" must be an array of Dockerfile stage names');
+  }
+  const trusted = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !/^[A-Za-z][A-Za-z0-9_.-]*$/.test(entry)) {
+      throw new ConfigError('"trustedArtifactOnlyScratchStages" entries must be valid Dockerfile stage names');
+    }
+    trusted.push(entry.toLowerCase());
   }
   return trusted;
 }
@@ -176,6 +192,7 @@ export function validateConfig(raw) {
     plugins,
     trustedActions: validateTrustedActions(raw.trustedActions),
     trustedNonRootImages: validateTrustedNonRootImages(raw.trustedNonRootImages),
+    trustedArtifactOnlyScratchStages: validateTrustedArtifactOnlyScratchStages(raw.trustedArtifactOnlyScratchStages),
     maxFileSize: validatePositiveInteger(raw.maxFileSize, 'maxFileSize', DEFAULT_CONFIG.maxFileSize),
     maxFiles: validatePositiveInteger(raw.maxFiles, 'maxFiles', DEFAULT_CONFIG.maxFiles),
   };
@@ -231,6 +248,7 @@ export async function loadConfig(options = {}) {
         plugins: [],
         trustedActions: [],
         trustedNonRootImages: [],
+        trustedArtifactOnlyScratchStages: [],
       },
       path: null,
       configDir: root,

@@ -114,16 +114,17 @@ test('container/missing-non-root-user flags a final stage without USER', async (
   assert.equal(found[0].line, 4);
 });
 
-test('container/missing-non-root-user ignores an artifact-only scratch export', async (t) => {
-  const result = await dockerScan(
+test('container/missing-non-root-user ignores an explicitly trusted artifact-only scratch export', async (t) => {
+  const result = await scanTree(
     t,
-    [
+    { Dockerfile: `${[
       'FROM example/builder:1.0.0 AS build',
       'RUN build-app',
       'FROM scratch AS artifacts',
       'COPY --from=build /out /',
       '',
-    ].join('\n'),
+    ].join('\n')}\n` },
+    { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } },
   );
   assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
 });
@@ -159,7 +160,7 @@ test('container/missing-non-root-user does not treat a scratch stage with RUN as
   assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 
-test('container/explicit-root-user still flags an artifact-only scratch export with USER root', async (t) => {
+test('container/explicit-root-user still flags a scratch export with USER root', async (t) => {
   const result = await dockerScan(
     t,
     ['FROM scratch', 'COPY server /server', 'USER root', ''].join('\n'),
@@ -184,7 +185,7 @@ test('container/missing-non-root-user accepts a distroless debug nonroot tag', a
   assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
 });
 
-test('container/missing-non-root-user accepts a nonroot contract before a digest', async (t) => {
+test('container/missing-non-root-user does not trust a nonroot tag when a digest selects the image', async (t) => {
   const result = await dockerScan(
     t,
     [
@@ -194,7 +195,7 @@ test('container/missing-non-root-user accepts a nonroot contract before a digest
       '',
     ].join('\n'),
   );
-  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 
 test('container/missing-non-root-user still flags a runtime base without a nonroot contract', async (t) => {
@@ -240,6 +241,92 @@ test('container/missing-non-root-user still requires a nonroot tag for a configu
     '',
   ].join('\n');
   const result = await scanTree(t, { Dockerfile: `${runtime}\n` }, { config: { trustedNonRootImages: ['images.example.com/team/'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user warns for a copy-only scratch image without explicit artifact policy', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM example/builder:1.0.0 AS build', 'RUN build-app', 'FROM scratch AS artifacts', 'COPY --from=build /out /', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user keeps the warning for trusted scratch exports with healthcheck onbuild or shell metadata', async (t) => {
+  for (const instruction of ['HEALTHCHECK CMD /health', 'ONBUILD RUN /setup', 'SHELL ["/bin/sh", "-c"]']) {
+    const result = await scanTree(t, {
+      Dockerfile: ['FROM example/builder:1.0.0 AS build', 'RUN build-app', 'FROM scratch AS artifacts', 'COPY --from=build /out /', instruction, ''].join('\n'),
+    }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+    assert.equal(byRule(result, 'container/missing-non-root-user').length, 1, instruction);
+  }
+});
+
+test('container/missing-non-root-user keeps the warning for trusted scratch exports without a cross stage copy', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM scratch AS artifacts', 'COPY server /server', ''].join('\n'),
+  }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user does not apply the scratch shortcut through a normally named stage', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM scratch AS artifacts', 'COPY --from=build /out /', 'FROM artifacts', ''].join('\n'),
+  }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user treats Docker tags as case sensitive', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['FROM gcr.io/distroless/static-debian13:NONROOT', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user does not extend an exact trusted repository to a lookalike repository', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM myorg/app-evil:nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  }, { config: { trustedNonRootImages: ['myorg/app'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user accepts an exact trusted repository but requires slash boundaries for descendants', async (t) => {
+  const exact = await scanTree(t, {
+    Dockerfile: ['FROM myorg/app:nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  }, { config: { trustedNonRootImages: ['myorg/app'] } });
+  assert.equal(byRule(exact, 'container/missing-non-root-user').length, 0);
+
+  const childWithoutNamespace = await scanTree(t, {
+    Dockerfile: ['FROM myorg/app/worker:nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  }, { config: { trustedNonRootImages: ['myorg/app'] } });
+  assert.equal(byRule(childWithoutNamespace, 'container/missing-non-root-user').length, 1);
+
+  const childWithNamespace = await scanTree(t, {
+    Dockerfile: ['FROM myorg/app/worker:nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  }, { config: { trustedNonRootImages: ['myorg/app/'] } });
+  assert.equal(byRule(childWithNamespace, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user does not exempt invalid uppercase image repositories', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM images.example.com/team/RUNTIME:nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  }, { config: { trustedNonRootImages: ['images.example.com/team/'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user keeps the warning for trusted scratch exports with runnable instructions', async (t) => {
+  for (const instruction of ['ENTRYPOINT ["/server"]', 'CMD ["/server"]', 'RUN /server --self-test']) {
+    const result = await scanTree(t, {
+      Dockerfile: ['FROM example/builder:1.0.0 AS build', 'RUN build-app', 'FROM scratch AS artifacts', 'COPY --from=build /out /', instruction, ''].join('\n'),
+    }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+    assert.equal(byRule(result, 'container/missing-non-root-user').length, 1, instruction);
+  }
+});
+
+test('container/missing-non-root-user does not trust a configured nonroot tag when a digest selects the image', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM images.example.com/team/runtime:nonroot@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  }, { config: { trustedNonRootImages: ['images.example.com/team/'] } });
   assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 

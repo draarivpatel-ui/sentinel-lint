@@ -7,6 +7,10 @@
  */
 
 import { defineRule } from '../rule-api.mjs';
+import {
+  imageRepositoryMatchesPrefix,
+  parseImageReference,
+} from '../image-ref.mjs';
 
 const DOCS = 'docs/rules.md#';
 const OWASP_MISCONFIGURATION = 'A05:2021-Security Misconfiguration';
@@ -89,7 +93,7 @@ function parseFromInstruction(text) {
       break;
     }
   }
-  return { image: tokens[0].toLowerCase(), alias };
+  return { image: tokens[0], alias };
 }
 
 function collectStages(instructions) {
@@ -106,6 +110,10 @@ function collectStages(instructions) {
         users: [],
         hasRuntimeCommand: false,
         hasBuildCommand: false,
+        hasRuntimeTrigger: false,
+        hasShellConfiguration: false,
+        hasNonArtifactInstruction: false,
+        hasCrossStageCopy: false,
       };
       stages.push(current);
       continue;
@@ -115,6 +123,21 @@ function collectStages(instructions) {
     }
     if (current !== null && instruction.instruction === 'RUN') {
       current.hasBuildCommand = true;
+    }
+    if (current !== null && (instruction.instruction === 'HEALTHCHECK' || instruction.instruction === 'ONBUILD')) {
+      current.hasRuntimeTrigger = true;
+    }
+    if (current !== null && instruction.instruction === 'SHELL') {
+      current.hasShellConfiguration = true;
+    }
+    if (current !== null && instruction.instruction === 'COPY' && /(?:^|\s)--from(?:=|\s+)\S+/.test(instruction.text)) {
+      current.hasCrossStageCopy = true;
+    }
+    if (
+      current !== null &&
+      !['COPY', 'ADD', 'ARG', 'LABEL', 'USER'].includes(instruction.instruction)
+    ) {
+      current.hasNonArtifactInstruction = true;
     }
     if (instruction.instruction === 'USER' && current !== null) {
       current.users.push(instruction);
@@ -140,7 +163,7 @@ function effectiveUser(stage, byAlias, seen = new Set()) {
     return { value: cleanUserValue(instruction.text), instruction, inherited: false };
   }
   if (stage.image === null || seen.has(stage.image)) return null;
-  const base = byAlias.get(stage.image);
+  const base = byAlias.get(stage.image.toLowerCase());
   if (base === undefined) return null;
   seen.add(stage.image);
   const inherited = effectiveUser(base, byAlias, seen);
@@ -164,33 +187,32 @@ function finalStageContext(text) {
   return { stage, user: effectiveUser(stage, byAlias) };
 }
 
-function imageTag(image) {
-  const withoutDigest = String(image).split('@')[0].toLowerCase();
-  const lastSlash = withoutDigest.lastIndexOf('/');
-  const lastColon = withoutDigest.lastIndexOf(':');
-  if (lastColon === -1 || lastColon < lastSlash) return null;
-  return withoutDigest.slice(lastColon + 1);
-}
-
 function hasNonRootTagComponent(tag) {
   return typeof tag === 'string' && tag.split(/[-_.]/).includes('nonroot');
 }
 
 function configuredNonRootImagePrefixes(config) {
   if (config === null || typeof config !== 'object' || !Array.isArray(config.trustedNonRootImages)) return [];
-  return config.trustedNonRootImages.map((entry) => String(entry).trim().toLowerCase()).filter((entry) => entry.length > 0);
+  return config.trustedNonRootImages.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0);
+}
+
+function configuredArtifactOnlyScratchStages(config) {
+  if (config === null || typeof config !== 'object' || !Array.isArray(config.trustedArtifactOnlyScratchStages)) return [];
+  return config.trustedArtifactOnlyScratchStages.map((entry) => String(entry).toLowerCase());
 }
 
 function isKnownNonRootBase(image, configuredPrefixes = []) {
-  const normalized = String(image).split('@')[0].toLowerCase();
-  const tag = imageTag(image);
-  if (!hasNonRootTagComponent(tag)) return false;
+  const parsed = parseImageReference(image);
+  if (!parsed.valid || parsed.digest !== null || !hasNonRootTagComponent(parsed.tag)) return false;
   const trusted = ['gcr.io/distroless/', ...configuredPrefixes];
-  return trusted.some((prefix) => normalized.startsWith(prefix));
+  return trusted.some((prefix) => imageRepositoryMatchesPrefix(parsed.name, prefix));
 }
 
-function isArtifactOnlyScratchStage(stage) {
-  return stage.image === 'scratch' && !stage.hasRuntimeCommand && !stage.hasBuildCommand;
+function isArtifactOnlyScratchStage(stage, trustedStages = []) {
+  if (stage.image !== 'scratch' || stage.alias === null || !trustedStages.includes(stage.alias)) return false;
+  if (stage.hasRuntimeCommand || stage.hasBuildCommand || stage.hasRuntimeTrigger || stage.hasShellConfiguration) return false;
+  if (stage.hasNonArtifactInstruction) return false;
+  return stage.hasCrossStageCopy;
 }
 
 const missingNonRootUser = defineRule({
@@ -208,7 +230,7 @@ const missingNonRootUser = defineRule({
   check(ctx) {
     const finalStage = finalStageContext(ctx.text);
     if (finalStage === null || finalStage.user !== null) return [];
-    if (isArtifactOnlyScratchStage(finalStage.stage)) return [];
+    if (isArtifactOnlyScratchStage(finalStage.stage, configuredArtifactOnlyScratchStages(ctx.config))) return [];
     if (isKnownNonRootBase(finalStage.stage.image, configuredNonRootImagePrefixes(ctx.config))) return [];
     return [
       {

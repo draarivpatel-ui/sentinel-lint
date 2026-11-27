@@ -52,11 +52,21 @@
       "default": []
     },
     "trustedNonRootImages": {
-      "description": "Image repository prefixes with a documented non-root tag contract trusted by container/missing-non-root-user. The tag must still contain nonroot as a whole component.",
+      "description": "Exact image repositories or namespace prefixes ending in a slash with a documented non-root tag contract trusted by container/missing-non-root-user. Docker tags remain case sensitive, and a digest-bearing reference is never exempted by tag inference.",
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1
+      },
+      "default": []
+    },
+    "trustedArtifactOnlyScratchStages": {
+      "description": "Exact Dockerfile stage names explicitly trusted as artifact-only final scratch exports. The stage must still contain only file-transfer or metadata instructions and at least one cross-stage COPY.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
       },
       "default": []
     },

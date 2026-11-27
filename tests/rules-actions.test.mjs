@@ -246,10 +246,127 @@ test('actions/unpinned-action reads a flow dependency list in actions.lock', asy
       "  'example-org/example-action@v1.0.0':",
       "    ref: 'v1.0.0'",
       `    commit: 'sha1-${PINNED}'`,
+      '    owner_id: 1',
+      '    repo_id: 2',
       '',
     ].join('\n'),
   });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action rejects lockfile ref metadata that disagrees with the pin key', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock({ ref: 'v1.0.1' }),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action rejects duplicate canonical dependency keys in actions.lock', async (t) => {
+  const duplicate = actionsLock().replace(
+    '    owner_id: 1\n    repo_id: 2\n',
+    `    owner_id: 1\n    repo_id: 2\n  'Example-Org/Example-Action@v1.0.0':\n    ref: 'v1.0.0'\n    commit: 'sha1-${PINNED}'\n    owner_id: 1\n    repo_id: 2\n`,
+  );
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': duplicate,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action rejects repeated lockfile sections', async (t) => {
+  const repeated = `${actionsLock()}workflows:\n`;
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': repeated,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action rejects unexpected nesting around lockfile commit metadata', async (t) => {
+  const nested = actionsLock().replace("    ref: 'v1.0.0'\n    commit:", "    ref: 'v1.0.0'\n      commit:");
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': nested,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action rejects invalid lockfile field types', async (t) => {
+  const wrongType = actionsLock().replace('    owner_id: 1', "    owner_id: '1'");
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': wrongType,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action rejects a lockfile uses graph entry missing its dependency record', async (t) => {
+  const missingGraphTarget = actionsLock().replace(
+    '    repo_id: 2\n',
+    "    repo_id: 2\n    uses:\n      - 'example-org/missing@v1'\n",
+  );
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': missingGraphTarget,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action matches the fully decoded YAML uses scalar against actions.lock', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: "example-org/example-action@v1.0.\\u0030"']),
+    '.github/workflows/actions.lock': actionsLock(),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action never uses actions.lock to suppress composite action metadata', async (t) => {
+  const result = await scanTree(t, {
+    'action.yml': 'runs:\n  using: composite\n  steps:\n    - uses: example-org/example-action@v1.0.0\n',
+    '.github/workflows/actions.lock': actionsLock({ workflowPath: 'action.yml' }),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action rejects unexpected lockfile sections and dependency fields', async (t) => {
+  const unexpectedSection = `${actionsLock()}release:\n`;
+  const sectionResult = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': unexpectedSection,
+  });
+  assert.equal(byRule(sectionResult, 'actions/unpinned-action').length, 1);
+
+  const unexpectedField = actionsLock().replace('    owner_id: 1\n', '    owner_id: 1\n    verifier: trusted\n');
+  const fieldResult = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': unexpectedField,
+  });
+  assert.equal(byRule(fieldResult, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action keeps a valid full SHA transitive lockfile entry', async (t) => {
+  const transitive = actionsLock().replace(
+    '    repo_id: 2\n',
+    `    repo_id: 2\n    uses:\n      - 'example-org/transitive@${PINNED}'\n  'example-org/transitive@${PINNED}':\n    ref: 'v2.0.0'\n    commit: 'sha1-${PINNED}'\n    owner_id: 3\n    repo_id: 4\n`,
+  );
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': transitive,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action rejects a full SHA lockfile key whose commit digest disagrees', async (t) => {
+  const mismatched = actionsLock().replace(
+    '    repo_id: 2\n',
+    `    repo_id: 2\n    uses:\n      - 'example-org/transitive@${PINNED}'\n  'example-org/transitive@${PINNED}':\n    ref: 'v2.0.0'\n    commit: 'sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n    owner_id: 3\n    repo_id: 4\n`,
+  );
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': mismatched,
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
 test('actions/write-all-permissions flags write-all', async (t) => {
