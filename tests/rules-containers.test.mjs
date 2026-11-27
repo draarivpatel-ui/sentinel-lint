@@ -312,6 +312,54 @@ test('container/docker-socket-mount flags long syntax source entries', async (t)
   assert.equal(byRule(result, 'container/docker-socket-mount').length, 1);
 });
 
+test('container/docker-socket-mount flags a same-line flow volume list', async (t) => {
+  const result = await composeScan(
+    t,
+    composeService(['    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]']),
+  );
+  const found = byRule(result, 'container/docker-socket-mount');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].line, 4);
+  assert.equal(found[0].column, 16);
+});
+
+test('container/docker-socket-mount flags a multiline flow volume list', async (t) => {
+  const result = await composeScan(
+    t,
+    composeService(['    volumes: [', '      "./app:/app",', '      "/var/run/docker.sock:/var/run/docker.sock",', '    ]']),
+  );
+  const found = byRule(result, 'container/docker-socket-mount');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].line, 6);
+  assert.equal(found[0].column, 8);
+});
+
+test('container/docker-socket-mount flags a flow mapping inside a flow volume list', async (t) => {
+  const result = await composeScan(
+    t,
+    composeService(['    volumes: [{ type: bind, source: /var/run/docker.sock, target: /sock }]']),
+  );
+  assert.equal(byRule(result, 'container/docker-socket-mount').length, 1);
+});
+
+test('container/docker-socket-mount flags a flow volume list starting on the next line', async (t) => {
+  const result = await composeScan(
+    t,
+    composeService(['    volumes:', '      [', '        "/var/run/docker.sock:/var/run/docker.sock",', '      ]']),
+  );
+  const found = byRule(result, 'container/docker-socket-mount');
+  assert.equal(found.length, 1);
+  assert.equal(found[0].line, 6);
+});
+
+test('container/docker-socket-mount does not flag a flow target only socket path', async (t) => {
+  const result = await composeScan(
+    t,
+    composeService(['    volumes: ["./socket-copy:/var/run/docker.sock"]']),
+  );
+  assert.equal(byRule(result, 'container/docker-socket-mount').length, 0);
+});
+
 test('container/docker-socket-mount does not flag the socket as only a target', async (t) => {
   const result = await composeScan(
     t,

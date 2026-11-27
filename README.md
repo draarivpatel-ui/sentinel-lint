@@ -3,7 +3,7 @@
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows, MCP configurations, AI agent instruction files and container
 builds. It ships **28 security rules**, a stable rule API, three reporters
-(terminal, JSON and SARIF 2.1.0) and **549 tests** that run on the Node.js
+(terminal, JSON and SARIF 2.1.0) and **554 tests** that run on the Node.js
 built in test runner without installing a single package.
 
 ```
@@ -283,7 +283,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-npm test          # 549 tests, no install step
+npm test          # 554 tests, no install step
 npm run self-scan # self scan
 ```
 

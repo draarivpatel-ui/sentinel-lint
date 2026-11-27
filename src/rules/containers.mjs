@@ -332,13 +332,17 @@ function unquote(value) {
   return trimmed;
 }
 
-function yamlScalar(raw) {
-  let value = stripYamlComment(String(raw)).trim();
+function stripYamlNodeProperties(value) {
+  let rest = String(value).trim();
   for (;;) {
-    const match = /^(?:&[A-Za-z0-9_-]+|![^\s]+)\s+/.exec(value);
-    if (match === null) break;
-    value = value.slice(match[0].length);
+    const match = /^(?:&[A-Za-z0-9_-]+|![^\s]+)\s+/.exec(rest);
+    if (match === null) return rest;
+    rest = rest.slice(match[0].length);
   }
+}
+
+function yamlScalar(raw) {
+  let value = stripYamlNodeProperties(stripYamlComment(String(raw)));
   value = unquote(value);
   const token = /^[^\s]+/.exec(value);
   return token === null ? '' : unquote(token[0]);
@@ -349,7 +353,8 @@ function composeKeyValue(line, key) {
   const pattern = new RegExp(`^([ \\t]*)(?:-[ \\t]+)?(?:(['"])${escaped}\\2|${escaped})[ \\t]*:[ \\t]*(.*)$`, 'i');
   const match = pattern.exec(line);
   if (match === null) return null;
-  return { indent: match[1].length, column: match[1].length + 1, value: yamlScalar(match[3] ?? '') };
+  const rawValue = stripYamlNodeProperties(stripYamlComment(match[3] ?? ''));
+  return { indent: match[1].length, column: match[1].length + 1, value: yamlScalar(match[3] ?? ''), rawValue };
 }
 
 function composeLines(text) {
@@ -416,18 +421,145 @@ const hostNetwork = defineRule({
   },
 });
 
+function appendFlowCharacter(state, char, line, column) {
+  if (state.itemLine === null) {
+    if (/\s/.test(char)) return;
+    state.itemLine = line;
+    state.itemColumn = column;
+  }
+  state.current += char;
+}
+
+function pushFlowEntry(state, entries) {
+  const text = state.current.trim();
+  if (text.length > 0) entries.push({ line: state.itemLine ?? 1, column: state.itemColumn ?? 1, text });
+  state.current = '';
+  state.itemLine = null;
+  state.itemColumn = null;
+}
+
+function feedFlowVolumeLine(state, entries, line, lineNumber) {
+  let index = 0;
+  if (!state.started) {
+    const start = line.indexOf('[');
+    if (start === -1) return;
+    state.started = true;
+    index = start + 1;
+  }
+
+  for (; index < line.length; index += 1) {
+    const char = line[index];
+    if (state.quote !== null) {
+      appendFlowCharacter(state, char, lineNumber, index + 1);
+      if (state.escaped) {
+        state.escaped = false;
+      } else if (state.quote === '"' && char === '\\') {
+        state.escaped = true;
+      } else if (char === state.quote) {
+        if (state.quote === "'" && line[index + 1] === "'") {
+          appendFlowCharacter(state, line[index + 1], lineNumber, index + 2);
+          index += 1;
+        } else {
+          state.quote = null;
+        }
+      }
+      continue;
+    }
+
+    if (char === '#' && (index === 0 || /\s/.test(line[index - 1]))) break;
+    if (char === '"' || char === "'") {
+      state.quote = char;
+      appendFlowCharacter(state, char, lineNumber, index + 1);
+      continue;
+    }
+    if (char === '[') {
+      state.nestedList += 1;
+      appendFlowCharacter(state, char, lineNumber, index + 1);
+      continue;
+    }
+    if (char === '{') {
+      state.nestedMap += 1;
+      appendFlowCharacter(state, char, lineNumber, index + 1);
+      continue;
+    }
+    if (char === ']') {
+      if (state.nestedList === 0) {
+        pushFlowEntry(state, entries);
+        state.done = true;
+        return;
+      }
+      state.nestedList -= 1;
+      appendFlowCharacter(state, char, lineNumber, index + 1);
+      continue;
+    }
+    if (char === '}') {
+      state.nestedMap = Math.max(0, state.nestedMap - 1);
+      appendFlowCharacter(state, char, lineNumber, index + 1);
+      continue;
+    }
+    if (char === ',' && state.nestedList === 0 && state.nestedMap === 0) {
+      pushFlowEntry(state, entries);
+      continue;
+    }
+    appendFlowCharacter(state, char, lineNumber, index + 1);
+  }
+
+  if (state.current.length > 0) state.current += ' ';
+}
+
+function collectFlowVolumeEntries(lines, startIndex, firstLine) {
+  const state = {
+    started: false,
+    done: false,
+    quote: null,
+    escaped: false,
+    nestedList: 0,
+    nestedMap: 0,
+    current: '',
+    itemLine: null,
+    itemColumn: null,
+  };
+  const entries = [];
+  feedFlowVolumeLine(state, entries, firstLine, startIndex + 1);
+  for (let cursor = startIndex + 1; !state.done && cursor < lines.length; cursor += 1) {
+    feedFlowVolumeLine(state, entries, lines[cursor], cursor + 1);
+  }
+  return entries;
+}
+
 function composeVolumeLines(lines) {
   const result = [];
   for (let index = 0; index < lines.length; index += 1) {
     if (/^\s*#/.test(lines[index])) continue;
     const parsed = composeKeyValue(lines[index], 'volumes');
     if (parsed === null) continue;
+    if (parsed.rawValue.startsWith('[')) {
+      result.push(...collectFlowVolumeEntries(lines, index, lines[index]));
+      continue;
+    }
+
+    let flowStart = null;
+    if (parsed.rawValue === '') {
+      for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+        const line = lines[cursor];
+        if (line.trim() === '' || /^\s*#/.test(line)) continue;
+        const indent = (/^[ \t]*/.exec(line) ?? [''])[0].length;
+        if (indent <= parsed.indent) break;
+        if (line.trim().startsWith('[')) flowStart = cursor;
+        break;
+      }
+    }
+    if (flowStart !== null) {
+      result.push(...collectFlowVolumeEntries(lines, flowStart, lines[flowStart]));
+      continue;
+    }
+
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
       const line = lines[cursor];
       if (line.trim() === '') continue;
       const indent = (/^[ \t]*/.exec(line) ?? [''])[0].length;
       if (indent <= parsed.indent) break;
-      result.push({ line: cursor + 1, text: line });
+      result.push({ line: cursor + 1, column: 1, text: line });
     }
   }
   return result;
@@ -438,12 +570,11 @@ export function isDockerSocketVolumeLine(line) {
   const cleaned = stripYamlComment(line).trim();
   if (cleaned === '') return false;
 
-  const longSyntax = /(?:^|[\s,{])(?:source|src)\s*:\s*['"]?\/var\/run\/docker\.sock['"]?(?=\s*[,}]|$)/i;
+  const longSyntax = /(?:^|[\s,{])(?:['"]?(?:source|src)['"]?)\s*:\s*['"]?\/var\/run\/docker\.sock['"]?(?=\s*[,}]|$)/i;
   if (longSyntax.test(cleaned)) return true;
 
   const listItem = /^-\s+(.+)$/.exec(cleaned);
-  if (listItem === null) return false;
-  const scalar = unquote(listItem[1]);
+  const scalar = unquote(listItem === null ? cleaned : listItem[1]);
   if (scalar.startsWith('{')) return longSyntax.test(scalar);
   const source = scalar.split(':')[0];
   return source === '/var/run/docker.sock';
@@ -465,7 +596,7 @@ const dockerSocketMount = defineRule({
     const findings = [];
     for (const entry of composeVolumeLines(composeLines(ctx.text))) {
       if (!isDockerSocketVolumeLine(entry.text)) continue;
-      const column = Math.max(1, entry.text.indexOf('/var/run/docker.sock') + 1);
+      const column = Math.max(1, (entry.column ?? 1) + entry.text.indexOf('/var/run/docker.sock'));
       findings.push({
         line: entry.line,
         column,
