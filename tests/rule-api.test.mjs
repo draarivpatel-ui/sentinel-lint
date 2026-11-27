@@ -194,7 +194,7 @@ test('the built in pack has no external runtime dependencies', async () => {
   const raw = await readFile(new URL('../package.json', import.meta.url), 'utf8');
   const manifest = JSON.parse(raw);
   assert.deepEqual(manifest.dependencies, {});
-  assert.deepEqual(manifest.devDependencies, {});
+  assert.deepEqual(manifest.devDependencies, { 'fast-check': '4.10.3' });
 });
 
 test('defineRule defaults owasp metadata to a frozen empty array', () => {

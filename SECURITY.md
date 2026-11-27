@@ -4,19 +4,20 @@
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x | yes |
+| 0.3.x | Yes |
+| 0.2.x and earlier | No |
 
-The project is pre 1.0. Fixes land on `main` and are released as a patch
-version. There are no long lived release branches.
+The project is pre 1.0. Security fixes land on `main` and are released as a
+patch version. There are no long lived release branches.
 
 ## Reporting a vulnerability
 
-Report privately through GitHub security advisories:
-<https://github.com/sentinel-lint/sentinel-lint/security/advisories/new>
+Report suspected vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/draarivpatel-ui/sentinel-lint/security/advisories/new).
 
-If advisory access is unavailable, contact the maintainers through the email
-listed on the repository profile. Please do not open a public issue, a public
-pull request or a discussion thread with reproduction steps.
+Please do not open a public issue, a public pull request or a discussion thread
+with reproduction steps. If advisory access is unavailable, open only a minimal
+public issue saying that a security report needs a private channel. Do not
+include exploit details or sensitive output in that issue.
 
 Include:
 
@@ -27,6 +28,21 @@ Include:
 
 Do not include real credentials. If a report needs a live token to demonstrate
 a pattern match, rotate it first and send only the shape.
+
+## Response and coordinated disclosure
+
+- Reports are acknowledged within 48 hours.
+- An initial assessment, including whether the report is in scope, is sent
+  within 7 calendar days.
+- A fix or mitigation plan for confirmed issues is developed as soon as
+  practical. A bypass that allows a critical finding to disappear is treated
+  as urgent.
+- Public disclosure is coordinated with the reporter. The default disclosure
+  window is up to 90 days from acknowledgment, with earlier disclosure when a
+  fix is available or a jointly agreed extension when more work is required.
+
+Credit is offered in the advisory unless you ask to stay anonymous. We do not
+operate a paid bounty.
 
 ## What counts as a vulnerability
 
@@ -63,17 +79,6 @@ are in scope:
 - Scanner output on intentionally vulnerable test fixtures.
 - Social engineering, physical access or dependency confusion against the
   package name itself. Report those to the registry.
-
-## Response
-
-- Acknowledgement within three business days.
-- An initial assessment, including whether the report is in scope, within seven
-  business days.
-- A fix or a mitigation plan for confirmed issues as soon as practical. A
-  bypass that allows a critical finding to disappear is treated as urgent.
-
-Credit is offered in the advisory unless you ask to stay anonymous. We do not
-operate a paid bounty.
 
 ## Safe harbor
 

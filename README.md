@@ -287,13 +287,17 @@ false negatives through [SECURITY.md](SECURITY.md).
 ```bash
 npm test          # 554 tests, no install step
 npm run self-scan # self scan
+npm ci            # only needed before fuzzing in a fresh checkout
+npm run test:fuzz # fast-check property tests
 ```
 
 Tests are deterministic, use the real filesystem only through temporary
-directories, and never reach the network. New rules need fixtures for both the
-finding case and the clean case. New contributors can follow the four step rule
-quickstart in [CONTRIBUTING.md](CONTRIBUTING.md) and claim a scoped specification
-from [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
+directories, and never reach the network. The property-based fuzz suite uses
+`fast-check` as a development-only dependency; runtime dependencies remain zero.
+New rules need fixtures for both the finding case and the clean case. New
+contributors can follow the four step rule quickstart in
+[CONTRIBUTING.md](CONTRIBUTING.md) and claim a scoped specification from
+[GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
