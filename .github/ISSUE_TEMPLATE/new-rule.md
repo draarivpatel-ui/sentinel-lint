@@ -46,7 +46,7 @@ identifier. Explain why it is not one level lower.
 - [ ] Finding fixture, clean fixture and a near miss in `tests/`
 - [ ] Section in `docs/rules.md` with a matching heading
 - [ ] Row in the README rule table
-- [ ] `node --test tests/` passes and `node bin/sentinel-lint.mjs scan .` is clean
+- [ ] `npm test` passes and `npm run self-scan` is clean
 
 ## Are you claiming this?
 

@@ -17,13 +17,38 @@ way.
    never read outside them. Fixtures use synthetic values only.
 6. **Small, explained changes.** One concern per pull request.
 
+## Add a new security rule in 4 steps (5 minutes)
+
+Most first rules take about five minutes to scaffold and fifteen minutes to
+finish. The exact files are named in each ready-to-claim specification.
+
+1. **Pick a specification.** Open [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md),
+   choose an unclaimed item, and keep its rule id, globs, severity and acceptance
+   criteria unchanged unless the issue discussion says otherwise.
+2. **Add the rule.** Create or edit the `src/rules/*.mjs` file named in the
+   specification and export a `defineRule` descriptor. Follow the closest existing
+   rule in `src/rules/actions.mjs`, `src/rules/mcp.mjs` or `src/rules/repo.mjs`,
+   then register the module in `src/rules/index.mjs`.
+3. **Prove the behavior.** Add tests to the `tests/rules-*.test.mjs` file named in
+   the specification with `scanTree` and `byRule` from `tests/helpers.mjs`. Cover
+   one finding, one clean input and one near miss.
+4. **Document and verify.** Add the rule section to `docs/rules.md`, add its row to
+   the README rule table, then run exactly:
+
+   ```bash
+   npm test
+   npm run self-scan
+   ```
+
+   Both commands must pass before you open the pull request.
+
 ## Getting started
 
 ```bash
 git clone <your fork>
 cd sentinel-lint
-node --test tests/                 # 359 tests, no install step
-node bin/sentinel-lint.mjs scan .  # self scan must stay clean
+npm test          # 382 tests, no install step
+npm run self-scan # self scan must stay clean
 ```
 
 There is no build step, no bundler and no transpiler. `bin/sentinel-lint.mjs`
@@ -118,9 +143,9 @@ directory when the test finishes. Do not mock the engine: the value of these
 tests is that they exercise the real file walker, glob matcher and suppression
 logic.
 
-Run everything with `node --test tests/`. Failures print the assertion, the
-fixture line and the reported position, which is usually enough to see whether
-the rule or the expectation is wrong.
+Run everything with `npm test`. Failures print the assertion, the fixture line
+and the reported position, which is usually enough to see whether the rule or
+the expectation is wrong.
 
 ## Reporters and engine changes
 
@@ -141,8 +166,8 @@ Engine changes must preserve three properties:
 Open the pull request against `main` and fill in the template. A change is
 ready when:
 
-- `node --test tests/` passes with no skipped tests
-- `node bin/sentinel-lint.mjs scan .` reports no findings
+- `npm test` passes with no skipped tests
+- `npm run self-scan` reports no findings
 - new behavior has tests, and docs are updated in the same commit
 - the pull request explains the failure mode, not only the code change
 

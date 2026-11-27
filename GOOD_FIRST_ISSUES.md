@@ -12,6 +12,7 @@ Every item follows the same contract:
 - a section in `docs/rules.md` with a heading whose text is the rule id
 - a row in the README rule table
 - tests with a finding fixture, a clean fixture and a near miss
+- verification with `npm test` and `npm run self-scan`
 
 Difficulty is labelled on each item. `starter` means a single file rule with a
 plain substring or line check. `moderate` means light parsing or state across

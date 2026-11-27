@@ -9,8 +9,8 @@ rule, include the smallest failing input and the nearest clean input.
 
 ## Checklist
 
-- [ ] `node --test tests/` passes with no skipped tests
-- [ ] `node bin/sentinel-lint.mjs scan .` reports no findings
+- [ ] `npm test` passes with no skipped tests
+- [ ] `npm run self-scan` reports no findings
 - [ ] New behavior has a finding fixture, a clean fixture and a near miss
 - [ ] `docs/rules.md` has a section for every new rule, with an anchor that matches `docsUrl`
 - [ ] The README rule table is updated when a rule is added or renamed

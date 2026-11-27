@@ -263,13 +263,15 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-npm test                          # 382 tests, no install step
-node bin/sentinel-lint.mjs scan .   # self scan
+npm test          # 382 tests, no install step
+npm run self-scan # self scan
 ```
 
 Tests are deterministic, use the real filesystem only through temporary
 directories, and never reach the network. New rules need fixtures for both the
-finding case and the clean case.
+finding case and the clean case. New contributors can follow the four step rule
+quickstart in [CONTRIBUTING.md](CONTRIBUTING.md) and claim a scoped specification
+from [GOOD_FIRST_ISSUES.md](GOOD_FIRST_ISSUES.md).
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
