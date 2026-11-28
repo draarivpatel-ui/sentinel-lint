@@ -238,3 +238,18 @@ test('loadConfig reads trustedNonRootImages from the scan root config', async (t
   const result = await loadConfig({ root, cwd: root });
   assert.deepEqual(result.config.trustedNonRootImages, ['images.example.com/team/']);
 });
+
+test('validateConfig defaults trustedActionsLockEnforcement to false', () => {
+  assert.equal(validateConfig({}).config.trustedActionsLockEnforcement, false);
+  assert.equal(validateConfig(undefined).config.trustedActionsLockEnforcement, false);
+});
+
+test('validateConfig accepts an explicit actions lock enforcement policy', () => {
+  assert.equal(validateConfig({ trustedActionsLockEnforcement: true }).config.trustedActionsLockEnforcement, true);
+  assert.equal(validateConfig({ trustedActionsLockEnforcement: false }).config.trustedActionsLockEnforcement, false);
+});
+
+test('validateConfig rejects a non-boolean actions lock enforcement policy', () => {
+  assert.throws(() => validateConfig({ trustedActionsLockEnforcement: 'true' }), ConfigError);
+  assert.throws(() => validateConfig({ trustedActionsLockEnforcement: 1 }), ConfigError);
+});

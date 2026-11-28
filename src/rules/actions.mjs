@@ -268,10 +268,13 @@ export function parseUses(line) {
   if (match === null) return null;
   const rawValue = stripNodeProperties(match[3] ?? '');
   const spec = yamlScalar(rawValue);
-  if (typeof spec !== 'string' || spec.length === 0) return null;
   const rawScalar = stripYamlComment(match[3]).trimStart();
   const quotedOffset = rawScalar.startsWith('"') || rawScalar.startsWith("'") ? 1 : 0;
-  return { spec, column: match[0].length - match[3].length + 1 + quotedOffset };
+  const column = match[0].length - match[3].length + 1 + quotedOffset;
+  if (typeof spec !== 'string' || spec.length === 0) {
+    return { spec: null, column, invalid: true };
+  }
+  return { spec, column };
 }
 
 export function isPinnedActionRef(ref) {
@@ -330,18 +333,64 @@ function stripYamlComment(text) {
   return text;
 }
 
+const YAML_DOUBLE_QUOTED_ESCAPES = new Map([
+  ['0', '\u0000'],
+  ['a', '\u0007'],
+  ['b', '\b'],
+  ['t', '\t'],
+  ['n', '\n'],
+  ['v', '\v'],
+  ['f', '\f'],
+  ['r', '\r'],
+  ['e', '\u001b'],
+  [' ', ' '],
+  ['"', '"'],
+  ['/', '/'],
+  ['\\', '\\'],
+  ['N', '\u0085'],
+  ['_', '\u00a0'],
+  ['L', '\u2028'],
+  ['P', '\u2029'],
+]);
+
+function decodeYamlDoubleQuoted(value) {
+  if (value.length < 2 || value[0] !== '"' || value[value.length - 1] !== '"') return null;
+  let decoded = '';
+  for (let index = 1; index < value.length - 1; index += 1) {
+    const char = value[index];
+    if (char !== '\\') {
+      decoded += char;
+      continue;
+    }
+
+    index += 1;
+    if (index >= value.length - 1) return null;
+    const escape = value[index];
+    const simple = YAML_DOUBLE_QUOTED_ESCAPES.get(escape);
+    if (simple !== undefined) {
+      decoded += simple;
+      continue;
+    }
+
+    const width = escape === 'x' ? 2 : escape === 'u' ? 4 : escape === 'U' ? 8 : 0;
+    if (width === 0 || index + width >= value.length - 1) return null;
+    const digits = value.slice(index + 1, index + 1 + width);
+    if (!/^[0-9a-fA-F]+$/.test(digits)) return null;
+    const codePoint = Number.parseInt(digits, 16);
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return null;
+    decoded += String.fromCodePoint(codePoint);
+    index += width;
+  }
+  return decoded;
+}
+
 function yamlScalar(raw) {
   const value = stripYamlComment(String(raw)).trim();
   if (value.length >= 2 && value[0] === "'" && value[value.length - 1] === "'") {
     return value.slice(1, -1).replace(/''/g, "'");
   }
   if (value.length >= 2 && value[0] === '"' && value[value.length - 1] === '"') {
-    try {
-      const parsed = JSON.parse(value);
-      return typeof parsed === 'string' ? parsed : null;
-    } catch {
-      return null;
-    }
+    return decodeYamlDoubleQuoted(value);
   }
   if (value[0] === "'" || value[0] === '"') return null;
   return value;
@@ -349,17 +398,25 @@ function yamlScalar(raw) {
 
 function typedYamlScalar(raw) {
   const value = stripYamlComment(String(raw)).trim();
-  if (value.length === 0) return { kind: 'string', value: '' };
+  if (value.length === 0) return { kind: 'null', value: null };
   if (value[0] === "'" || value[0] === '"') {
     const decoded = yamlScalar(value);
     return decoded === null ? null : { kind: 'string', value: decoded };
   }
-  if (/^-?(?:0|[1-9][0-9]*)$/.test(value)) {
-    const number = Number(value);
-    if (Number.isSafeInteger(number)) return { kind: 'number', value: number };
+  if (/^(?:null|Null|NULL|~)$/.test(value)) return { kind: 'null', value: null };
+  if (/^(?:true|True|TRUE|false|False|FALSE)$/.test(value)) {
+    return { kind: 'boolean', value: value.toLowerCase() === 'true' };
   }
-  if (value === 'true' || value === 'false') return { kind: 'boolean', value: value === 'true' };
-  if (value === 'null' || value === '~') return { kind: 'null', value: null };
+  if (/^[-+]?[0-9]+$/.test(value)) return { kind: 'number', value: Number(value) };
+  if (/^0o[0-7]+$/.test(value)) return { kind: 'number', value: Number.parseInt(value.slice(2), 8) };
+  if (/^0x[0-9a-fA-F]+$/.test(value)) return { kind: 'number', value: Number.parseInt(value.slice(2), 16) };
+  if (/^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$/.test(value)) {
+    return { kind: 'float', value: Number(value) };
+  }
+  if (/^[-+]?\.(?:inf|Inf|INF)$/.test(value)) {
+    return { kind: 'float', value: value.startsWith('-') ? -Infinity : Infinity };
+  }
+  if (/^\.(?:nan|NaN|NAN)$/.test(value)) return { kind: 'float', value: NaN };
   return { kind: 'string', value };
 }
 
@@ -462,6 +519,7 @@ function parseYamlSubset(text) {
     const withoutComment = stripYamlComment(rawLine).replace(/[ \t]+$/u, '');
     if (withoutComment.trim() === '') continue;
     const indent = leadingIndent(withoutComment);
+    if (indent > 256) return null;
     lines.push({ indent, content: withoutComment.slice(indent) });
   }
   if (lines.length === 0) return null;
@@ -562,7 +620,7 @@ function stringNode(node) {
 
 function positiveIntegerNode(node) {
   const scalar = scalarNode(node, 'number');
-  return scalar !== null && Number.isInteger(scalar.value) && scalar.value > 0 ? scalar.value : null;
+  return scalar !== null && Number.isSafeInteger(scalar.value) && scalar.value > 0 ? scalar.value : null;
 }
 
 function isSafeLockWorkflowPath(filePath) {
@@ -600,7 +658,12 @@ function invalidActionsLock() {
 export function parseActionsLock(text) {
   const invalid = invalidActionsLock();
   if (typeof text !== 'string' || text.length > 1024 * 1024) return invalid;
-  const root = parseYamlSubset(text);
+  let root;
+  try {
+    root = parseYamlSubset(text);
+  } catch {
+    return invalid;
+  }
   if (root === null || root.type !== 'map') return invalid;
 
   for (const key of root.entries.keys()) {
@@ -671,19 +734,27 @@ export function parseActionsLock(text) {
   }
 
   const color = new Map();
-  function hasCycle(key) {
-    if (color.get(key) === 1) return true;
-    if (color.get(key) === 2) return false;
-    color.set(key, 1);
-    const action = dependencies.get(key);
-    for (const next of action === undefined ? [] : action.uses) {
-      if (hasCycle(next)) return true;
+  for (const start of dependencies.keys()) {
+    if (color.get(start) === 2) continue;
+    color.set(start, 1);
+    const stack = [{ key: start, nextIndex: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const action = dependencies.get(frame.key);
+      const uses = action === undefined ? [] : action.uses;
+      if (frame.nextIndex >= uses.length) {
+        color.set(frame.key, 2);
+        stack.pop();
+        continue;
+      }
+      const next = uses[frame.nextIndex];
+      frame.nextIndex += 1;
+      const nextColor = color.get(next);
+      if (nextColor === 1) return invalid;
+      if (nextColor === 2) continue;
+      color.set(next, 1);
+      stack.push({ key: next, nextIndex: 0 });
     }
-    color.set(key, 2);
-    return false;
-  }
-  for (const key of dependencies.keys()) {
-    if (hasCycle(key)) return invalid;
   }
 
   return { version, workflows, dependencies, valid: true };
@@ -733,13 +804,22 @@ const unpinnedAction = defineRule({
   check(ctx) {
     const findings = [];
     const lines = workflowLines(ctx.text);
-    const lock = readActionsLock(ctx);
+    const lock = ctx.config.trustedActionsLockEnforcement === true ? readActionsLock(ctx) : null;
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
       if (isCommentLine(line)) continue;
       const parsed = parseUses(line);
       if (parsed === null) continue;
       const { spec, column } = parsed;
+      if (spec === null) {
+        findings.push({
+          line: index + 1,
+          column,
+          message:
+            'This uses value cannot be decoded safely, so it is treated as unpinned; write a literal action reference and pin it to a full 40 character commit SHA.',
+        });
+        continue;
+      }
       if (spec.startsWith('./') || spec.startsWith('$/') || spec.startsWith('docker://')) continue;
 
       const at = spec.lastIndexOf('@');

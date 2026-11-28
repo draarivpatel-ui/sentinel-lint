@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { byRule, scanTree } from './helpers.mjs';
+import { parseActionsLock } from '../src/rules/actions.mjs';
 
 const WORKFLOW = '.github/workflows/ci.yml';
 const PINNED = '0123456789abcdef0123456789abcdef01234567';
@@ -171,15 +172,32 @@ test('actions/unpinned-action accepts a dependency pinned by actions.lock', asyn
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': actionsLock(),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+
+test('actions/unpinned-action does not trust actions.lock without an explicit enforcement policy', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock(),
+  });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+test('actions/unpinned-action does not trust actions.lock when enforcement policy is false', async (t) => {
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+    '.github/workflows/actions.lock': actionsLock(),
+  }, { config: { trustedActionsLockEnforcement: false } });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
 test('actions/unpinned-action canonicalizes owner and repository casing in actions.lock', async (t) => {
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: Example-Org/Example-Action@v1.0.0']),
     '.github/workflows/actions.lock': actionsLock(),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
 });
 
@@ -250,7 +268,7 @@ test('actions/unpinned-action reads a flow dependency list in actions.lock', asy
       '    repo_id: 2',
       '',
     ].join('\n'),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
 });
 
@@ -317,7 +335,7 @@ test('actions/unpinned-action matches the fully decoded YAML uses scalar against
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: "example-org/example-action@v1.0.\\u0030"']),
     '.github/workflows/actions.lock': actionsLock(),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
 });
 
@@ -353,7 +371,7 @@ test('actions/unpinned-action keeps a valid full SHA transitive lockfile entry',
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': transitive,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
 });
 
@@ -367,6 +385,99 @@ test('actions/unpinned-action rejects a full SHA lockfile key whose commit diges
     '.github/workflows/actions.lock': mismatched,
   });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
+});
+
+
+test('actions/unpinned-action rejects YAML core boolean and float refs in actions.lock', async (t) => {
+  for (const [ref, yamlValue] of [['true', 'true'], ['1.5', '1.5']]) {
+    const key = `example-org/example-action@${ref}`;
+    const lock = actionsLock({ key, ref })
+      .replace(`ref: '${ref}'`, `ref: ${yamlValue}`)
+      .replace(/'example-org\/example-action@[^']+'/g, `'${key}'`);
+    const result = await scanTree(t, {
+      ...workflow(['jobs:', '  b:', '    steps:', `      - uses: ${key}`]),
+      '.github/workflows/actions.lock': lock,
+    }, { config: { trustedActionsLockEnforcement: true } });
+    assert.equal(byRule(result, 'actions/unpinned-action').length, 1, `${yamlValue} must keep its YAML type`);
+  }
+});
+
+test('actions/unpinned-action rejects floating point lockfile identifiers even when numerically integral', async (t) => {
+  for (const value of ['1.0', '1e0', '.inf', '.nan', '9007199254740993']) {
+    const wrongType = actionsLock().replace('    owner_id: 1', `    owner_id: ${value}`);
+    const result = await scanTree(t, {
+      ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
+      '.github/workflows/actions.lock': wrongType,
+    }, { config: { trustedActionsLockEnforcement: true } });
+    assert.equal(byRule(result, 'actions/unpinned-action').length, 1, value);
+  }
+});
+
+test('actions/unpinned-action decodes YAML-only double quoted escapes in uses', async (t) => {
+  const escaped = '      - uses: "example-org/example-action@v1.0.\\x30"';
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', escaped]),
+    '.github/workflows/actions.lock': actionsLock(),
+  }, { config: { trustedActionsLockEnforcement: true } });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action decodes every YAML double quoted escape class', async (t) => {
+  const escaped = '      - uses: "example-org/example-action@v1.0.\\U00000030"';
+  const result = await scanTree(t, {
+    ...workflow(['jobs:', '  b:', '    steps:', escaped]),
+    '.github/workflows/actions.lock': actionsLock(),
+  }, { config: { trustedActionsLockEnforcement: true } });
+  assert.equal(byRule(result, 'actions/unpinned-action').length, 0);
+});
+
+test('actions/unpinned-action warns instead of skipping an undecodable uses scalar', async (t) => {
+  for (const value of ['"example-org/example-action@\\q"', '"example-org/example-action', '']) {
+    const result = await scanTree(
+      t,
+      workflow(['jobs:', '  b:', '    steps:', `      - uses: ${value}`]),
+    );
+    const found = byRule(result, 'actions/unpinned-action');
+    assert.equal(found.length, 1, value || 'empty uses');
+    assert.match(found[0].message, /cannot be decoded safely/);
+  }
+});
+
+test('parseActionsLock validates a deep uses graph iteratively', () => {
+  const depth = 7000;
+  const parts = ["version: 'v0.0.3'", 'dependencies:'];
+  for (let index = 0; index < depth; index += 1) {
+    const key = `a/a@${index}`;
+    parts.push(`  '${key}':`, `    ref: '${index}'`, `    commit: 'sha1-${PINNED}'`, '    owner_id: 1', '    repo_id: 2');
+    if (index + 1 < depth) parts.push(`    uses: ['a/a@${index + 1}']`);
+  }
+  const parsed = parseActionsLock(`${parts.join('\n')}\n`);
+  assert.equal(parsed.valid, true);
+  assert.equal(parsed.dependencies.size, depth);
+});
+
+test('parseActionsLock rejects deep cycles and nested overlimits without throwing', () => {
+  const cycle = [
+    "version: 'v0.0.3'",
+    'dependencies:',
+    "  'example-org/a@v1':",
+    "    ref: 'v1'",
+    `    commit: 'sha1-${PINNED}'`,
+    '    owner_id: 1',
+    '    repo_id: 2',
+    "    uses: ['example-org/b@v1']",
+    "  'example-org/b@v1':",
+    "    ref: 'v1'",
+    `    commit: 'sha1-${PINNED}'`,
+    '    owner_id: 1',
+    '    repo_id: 2',
+    "    uses: ['example-org/a@v1']",
+    '',
+  ].join('\n');
+  assert.equal(parseActionsLock(cycle).valid, false);
+
+  const nested = `${' '.repeat(300)}key: value\n`;
+  assert.equal(parseActionsLock(nested).valid, false);
 });
 
 test('actions/write-all-permissions flags write-all', async (t) => {

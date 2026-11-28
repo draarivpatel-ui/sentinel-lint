@@ -24,6 +24,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   trustedActions: Object.freeze([]),
   trustedNonRootImages: Object.freeze([]),
   trustedArtifactOnlyScratchStages: Object.freeze([]),
+  trustedActionsLockEnforcement: false,
   maxFileSize: 1024 * 1024,
   maxFiles: 20000,
 });
@@ -38,6 +39,7 @@ const KNOWN_KEYS = new Set([
   'trustedActions',
   'trustedNonRootImages',
   'trustedArtifactOnlyScratchStages',
+  'trustedActionsLockEnforcement',
   'maxFileSize',
   'maxFiles',
 ]);
@@ -124,6 +126,14 @@ function validateTrustedArtifactOnlyScratchStages(value) {
   return trusted;
 }
 
+function validateTrustedActionsLockEnforcement(value) {
+  if (value === undefined) return false;
+  if (typeof value !== 'boolean') {
+    throw new ConfigError('"trustedActionsLockEnforcement" must be a boolean');
+  }
+  return value;
+}
+
 function validatePositiveInteger(value, key, fallback) {
   if (value === undefined) return fallback;
   if (!Number.isInteger(value) || value <= 0) {
@@ -193,6 +203,7 @@ export function validateConfig(raw) {
     trustedActions: validateTrustedActions(raw.trustedActions),
     trustedNonRootImages: validateTrustedNonRootImages(raw.trustedNonRootImages),
     trustedArtifactOnlyScratchStages: validateTrustedArtifactOnlyScratchStages(raw.trustedArtifactOnlyScratchStages),
+    trustedActionsLockEnforcement: validateTrustedActionsLockEnforcement(raw.trustedActionsLockEnforcement),
     maxFileSize: validatePositiveInteger(raw.maxFileSize, 'maxFileSize', DEFAULT_CONFIG.maxFileSize),
     maxFiles: validatePositiveInteger(raw.maxFiles, 'maxFiles', DEFAULT_CONFIG.maxFiles),
   };
@@ -249,6 +260,7 @@ export async function loadConfig(options = {}) {
         trustedActions: [],
         trustedNonRootImages: [],
         trustedArtifactOnlyScratchStages: [],
+        trustedActionsLockEnforcement: false,
       },
       path: null,
       configDir: root,

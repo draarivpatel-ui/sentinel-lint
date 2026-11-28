@@ -616,6 +616,77 @@ test('container dockerfile rules do not scan shell scripts', async (t) => {
   assert.equal(byRule(result, 'container/curl-pipe-shell').length, 0);
 });
 
+
+test('collectDockerInstructions does not insert a space Docker did not have', () => {
+  const digest = 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const instructions = collectDockerInstructions(`FROM example/base:nonroot\\\n@${digest}\n`);
+  assert.equal(instructions.length, 1);
+  assert.equal(instructions[0].text, `example/base:nonroot@${digest}`);
+});
+
+test('container/missing-non-root-user sees a digest hidden behind a backslash continuation', async (t) => {
+  const digest = 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const result = await dockerScan(
+    t,
+    `FROM gcr.io/distroless/static-debian13:nonroot\\\n@${digest}\nCOPY server /server\nENTRYPOINT ["/server"]\n`,
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user accepts valid Docker separators and a registry port', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: 'FROM localhost:5000/team/run--time__base:nonroot\nCOPY server /server\nENTRYPOINT ["/server"]\n',
+  }, { config: { trustedNonRootImages: ['localhost:5000/team/'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user does not count COPY from an external image as artifact export', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM scratch AS artifacts', 'COPY --from=ghcr.io/example/builder /out /', ''].join('\n'),
+  }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user does not count COPY from the same stage or a missing stage', async (t) => {
+  for (const source of ['artifacts', 'missing']) {
+    const result = await scanTree(t, {
+      Dockerfile: ['FROM scratch AS artifacts', `COPY --from=${source} /out /`, ''].join('\n'),
+    }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+    assert.equal(byRule(result, 'container/missing-non-root-user').length, 1, source);
+  }
+});
+
+test('container/missing-non-root-user verifies the real COPY flag rather than argument text', async (t) => {
+  for (const copyLine of ['COPY /out --from=build', 'COPY --from build /out /', 'COPY --from=build --from=build /out /']) {
+    const result = await scanTree(t, {
+      Dockerfile: ['FROM example/builder:1.0.0 AS build', 'RUN build-app', 'FROM scratch AS artifacts', copyLine, ''].join('\n'),
+    }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+    assert.equal(byRule(result, 'container/missing-non-root-user').length, 1, copyLine);
+  }
+});
+
+test('container/missing-non-root-user accepts a numeric COPY source for an earlier stage', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['FROM example/builder:1.0.0 AS build', 'RUN build-app', 'FROM scratch AS artifacts', 'COPY --from=0 /out /', ''].join('\n'),
+  }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+});
+
+test('container/missing-non-root-user applies a custom escape directive to continuations', async (t) => {
+  const result = await scanTree(t, {
+    Dockerfile: ['# escape=`', 'FROM example/builder:1.0.0 AS build', 'RUN build-app', 'FROM scratch AS artifacts', 'COPY --from=build /out /', 'R`', 'UN /setup', ''].join('\n'),
+  }, { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } });
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('container/missing-non-root-user keeps the warning when the escape directive is invalid', async (t) => {
+  const result = await dockerScan(
+    t,
+    ['# escape=!', 'FROM gcr.io/distroless/static-debian13:nonroot', 'COPY server /server', 'ENTRYPOINT ["/server"]', ''].join('\n'),
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
 test('a minimal non-root Dockerfile produces no container findings', async (t) => {
   const result = await dockerScan(
     t,

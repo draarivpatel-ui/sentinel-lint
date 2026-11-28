@@ -32,54 +32,109 @@ export function isComposeFile(file) {
   return name.includes('compose') && (name.endsWith('.yml') || name.endsWith('.yaml'));
 }
 
+function stripLeadingDockerWhitespace(line) {
+  return String(line).replace(/^[\t\v\f\r ]+/u, '');
+}
+
+function isDockerCommentLine(line) {
+  return stripLeadingDockerWhitespace(line).startsWith('#');
+}
+
+function isEmptyDockerContinuationLine(line) {
+  return stripLeadingDockerWhitespace(line).length === 0;
+}
+
+function trimDockerContinuation(line, escapeToken) {
+  let end = line.length;
+  while (end > 0 && (line[end - 1] === ' ' || line[end - 1] === '\t')) end -= 1;
+  if (end === 0 || line[end - 1] !== escapeToken) return { text: line, endOfLine: true };
+  if (end >= 2 && line[end - 2] === escapeToken) return { text: line, endOfLine: true };
+  return { text: line.slice(0, end - 1), endOfLine: false };
+}
+
+function readDockerParserDirective(line, state) {
+  if (state.done) return false;
+  if (!line.startsWith('#')) {
+    state.done = true;
+    return false;
+  }
+
+  const body = line.slice(1).replace(/^\s+/u, '');
+  const match = /^([a-zA-Z][a-zA-Z0-9]*)\s*=\s*(.+?)\s*$/u.exec(body);
+  if (match === null || !['syntax', 'check', 'escape'].includes(match[1].toLowerCase())) {
+    state.done = true;
+    return false;
+  }
+
+  const name = match[1].toLowerCase();
+  if (state.seen.has(name)) {
+    state.reliable = false;
+    return true;
+  }
+  state.seen.add(name);
+
+  if (name !== 'escape') return true;
+  const value = match[2];
+  if (value !== '\\' && value !== '`') {
+    state.reliable = false;
+    return true;
+  }
+  state.escapeToken = value;
+  return true;
+}
+
+function collectDockerInstructionResult(text) {
+  const lines = textLines(text);
+  if (lines.length > 0 && lines[0].startsWith('\ufeff')) lines[0] = lines[0].slice(1);
+  const state = { done: false, seen: new Set(), escapeToken: '\\', reliable: true };
+  const instructions = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const raw = lines[index];
+    const line = stripLeadingDockerWhitespace(raw);
+    readDockerParserDirective(line, state);
+    index += 1;
+
+    if (line === '' || line.startsWith('#')) continue;
+
+    const startLine = index;
+    const column = raw.length - line.length + 1;
+    let piece = trimDockerContinuation(line, state.escapeToken);
+    if (piece.endOfLine && piece.text.length === 0) continue;
+
+    let logical = piece.text;
+    let endOfLine = piece.endOfLine;
+    while (!endOfLine && index < lines.length) {
+      const continuation = lines[index];
+      index += 1;
+      if (isDockerCommentLine(continuation)) continue;
+      if (isEmptyDockerContinuationLine(continuation)) continue;
+      piece = trimDockerContinuation(continuation, state.escapeToken);
+      logical += piece.text;
+      endOfLine = piece.endOfLine;
+    }
+
+    const trimmed = logical.trim();
+    const match = /^([A-Za-z]+)(?:\s+([\s\S]*))?$/.exec(trimmed);
+    if (match === null) continue;
+    instructions.push({
+      instruction: match[1].toUpperCase(),
+      line: startLine,
+      column,
+      text: (match[2] ?? '').trim(),
+    });
+  }
+
+  return { instructions, reliable: state.reliable, escapeToken: state.escapeToken };
+}
+
 /**
- * Collect Dockerfile instructions, joining backslash continuations while
- * retaining the instruction's first line for findings.
+ * Collect Dockerfile instructions using Docker's continuation rules while
+ * retaining each instruction's first line for findings.
  */
 export function collectDockerInstructions(text) {
-  const lines = textLines(text);
-  const instructions = [];
-  let pending = null;
-
-  function flush() {
-    if (pending === null) return;
-    instructions.push({
-      instruction: pending.instruction,
-      line: pending.line,
-      column: pending.column,
-      text: pending.parts.join(' ').replace(/\s+/g, ' ').trim(),
-    });
-    pending = null;
-  }
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const trimmed = line.trim();
-
-    if (pending === null) {
-      if (trimmed === '' || trimmed.startsWith('#')) continue;
-      const match = /^([ \t]*)([A-Za-z]+)[ \t]*(.*)$/.exec(line);
-      if (match === null) continue;
-      pending = {
-        instruction: match[2].toUpperCase(),
-        line: index + 1,
-        column: match[1].length + 1,
-        parts: [match[3] ?? ''],
-      };
-    } else {
-      pending.parts.push(trimmed);
-    }
-
-    const current = pending.parts[pending.parts.length - 1].replace(/[ \t]+$/, '');
-    if (current.endsWith('\\')) {
-      pending.parts[pending.parts.length - 1] = current.slice(0, -1);
-      continue;
-    }
-    flush();
-  }
-
-  flush();
-  return instructions;
+  return collectDockerInstructionResult(text).instructions;
 }
 
 function parseFromInstruction(text) {
@@ -87,22 +142,121 @@ function parseFromInstruction(text) {
   while (tokens.length > 0 && tokens[0].startsWith('--')) tokens.shift();
   if (tokens.length === 0) return { image: null, alias: null };
   let alias = null;
-  for (let index = 1; index < tokens.length - 1; index += 1) {
-    if (tokens[index].toLowerCase() === 'as') {
-      alias = tokens[index + 1].toLowerCase();
-      break;
-    }
+  if (tokens.length === 3 && tokens[1].toLowerCase() === 'as') {
+    alias = tokens[2].toLowerCase();
   }
   return { image: tokens[0], alias };
 }
 
-function collectStages(instructions) {
+function isDockerWhitespace(char) {
+  return /\s/u.test(char);
+}
+
+function extractDockerBuilderFlags(line, escapeToken) {
+  const flags = [];
+  let index = 0;
+  while (index < line.length) {
+    while (index < line.length && isDockerWhitespace(line[index])) index += 1;
+    if (index >= line.length) break;
+    if (line[index] !== '-' || line[index + 1] !== '-') {
+      return { flags, rest: line.slice(index) };
+    }
+
+    let word = '';
+    let quote = null;
+    while (index < line.length) {
+      const char = line[index];
+      if (quote !== null) {
+        if (char === quote) {
+          quote = null;
+          index += 1;
+          continue;
+        }
+        if (char === escapeToken) {
+          if (index + 1 >= line.length) {
+            index += 1;
+            continue;
+          }
+          index += 1;
+          word += line[index];
+          index += 1;
+          continue;
+        }
+        word += char;
+        index += 1;
+        continue;
+      }
+
+      if (isDockerWhitespace(char)) break;
+      if (char === '"' || char === "'") {
+        quote = char;
+        index += 1;
+        continue;
+      }
+      if (char === escapeToken) {
+        if (index + 1 >= line.length) {
+          index += 1;
+          continue;
+        }
+        index += 1;
+        word += line[index];
+        index += 1;
+        continue;
+      }
+      word += char;
+      index += 1;
+    }
+
+    if (word === '--') return { flags, rest: line.slice(index) };
+    if (word.length > 0) flags.push(word);
+  }
+  return { flags, rest: '' };
+}
+
+function copyFromValue(text, escapeToken) {
+  const { flags } = extractDockerBuilderFlags(text, escapeToken);
+  let value = null;
+  let seen = false;
+  let invalid = false;
+  for (const flag of flags) {
+    if (!flag.startsWith('--')) {
+      invalid = true;
+      continue;
+    }
+    const equal = flag.indexOf('=');
+    const name = equal === -1 ? flag.slice(2) : flag.slice(2, equal);
+    if (name !== 'from') continue;
+    if (seen) invalid = true;
+    seen = true;
+    if (equal === -1 || equal === flag.length - 1) {
+      invalid = true;
+    } else {
+      value = flag.slice(equal + 1);
+    }
+  }
+  return invalid ? { value: null, invalid: true } : { value, invalid: false };
+}
+
+function copySourceIsEarlierStage(source, current, stages) {
+  if (/^[0-9]+$/.test(source)) {
+    const index = Number(source);
+    return Number.isSafeInteger(index) && index >= 0 && index < current.index;
+  }
+  const normalized = source.toLowerCase();
+  for (let index = 0; index < current.index; index += 1) {
+    if (stages[index].alias === normalized) return true;
+  }
+  return false;
+}
+
+function collectStages(instructions, escapeToken = '\\') {
   const stages = [];
   let current = null;
   for (const instruction of instructions) {
     if (instruction.instruction === 'FROM') {
       const parsed = parseFromInstruction(instruction.text);
       current = {
+        index: stages.length,
         line: instruction.line,
         column: instruction.column,
         image: parsed.image,
@@ -130,8 +284,11 @@ function collectStages(instructions) {
     if (current !== null && instruction.instruction === 'SHELL') {
       current.hasShellConfiguration = true;
     }
-    if (current !== null && instruction.instruction === 'COPY' && /(?:^|\s)--from(?:=|\s+)\S+/.test(instruction.text)) {
-      current.hasCrossStageCopy = true;
+    if (current !== null && instruction.instruction === 'COPY') {
+      const copyFrom = copyFromValue(instruction.text, escapeToken);
+      if (copyFrom.value !== null && copySourceIsEarlierStage(copyFrom.value, current, stages)) {
+        current.hasCrossStageCopy = true;
+      }
     }
     if (
       current !== null &&
@@ -176,15 +333,15 @@ function isRootUserValue(value) {
 }
 
 function finalStageContext(text) {
-  const instructions = collectDockerInstructions(text);
-  const stages = collectStages(instructions);
+  const collected = collectDockerInstructionResult(text);
+  const stages = collectStages(collected.instructions, collected.escapeToken);
   if (stages.length === 0) return null;
   const byAlias = new Map();
   for (const stage of stages) {
     if (stage.alias !== null) byAlias.set(stage.alias, stage);
   }
   const stage = stages[stages.length - 1];
-  return { stage, user: effectiveUser(stage, byAlias) };
+  return { stage, user: effectiveUser(stage, byAlias), reliable: collected.reliable };
 }
 
 function hasNonRootTagComponent(tag) {
@@ -230,8 +387,8 @@ const missingNonRootUser = defineRule({
   check(ctx) {
     const finalStage = finalStageContext(ctx.text);
     if (finalStage === null || finalStage.user !== null) return [];
-    if (isArtifactOnlyScratchStage(finalStage.stage, configuredArtifactOnlyScratchStages(ctx.config))) return [];
-    if (isKnownNonRootBase(finalStage.stage.image, configuredNonRootImagePrefixes(ctx.config))) return [];
+    if (finalStage.reliable && isArtifactOnlyScratchStage(finalStage.stage, configuredArtifactOnlyScratchStages(ctx.config))) return [];
+    if (finalStage.reliable && isKnownNonRootBase(finalStage.stage.image, configuredNonRootImagePrefixes(ctx.config))) return [];
     return [
       {
         line: finalStage.stage.line,

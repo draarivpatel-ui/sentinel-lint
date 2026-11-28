@@ -383,6 +383,7 @@ const STARTER_CONFIG = {
   trustedActions: [],
   trustedNonRootImages: [],
   trustedArtifactOnlyScratchStages: [],
+  trustedActionsLockEnforcement: false,
 };
 
 async function commandInit(options, io) {

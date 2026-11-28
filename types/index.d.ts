@@ -130,6 +130,7 @@ export interface SentinelConfig {
   trustedActions: string[];
   trustedNonRootImages: string[];
   trustedArtifactOnlyScratchStages: string[];
+  trustedActionsLockEnforcement: boolean;
   maxFileSize: number;
   maxFiles: number;
 }
@@ -144,6 +145,7 @@ export interface RawConfig {
   trustedActions?: string[];
   trustedNonRootImages?: string[];
   trustedArtifactOnlyScratchStages?: string[];
+  trustedActionsLockEnforcement?: boolean;
   maxFileSize?: number;
   maxFiles?: number;
 }

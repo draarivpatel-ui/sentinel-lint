@@ -1,5 +1,5 @@
 const TAG_RE = /^[\w][\w.-]{0,127}$/;
-const REPOSITORY_COMPONENT_RE = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+const REPOSITORY_COMPONENT_RE = /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$/;
 const REGISTRY_RE = /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?$/;
 const DIGEST_RE = /^[a-z0-9]+(?:[+._-][a-z0-9]+)*:[a-f0-9]{32,}$/;
 

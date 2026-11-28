@@ -48,7 +48,7 @@ finish. The exact files are named in each ready-to-claim specification.
 ```bash
 git clone <your fork>
 cd sentinel-lint
-npm test          # 608 tests, no install step
+npm test          # 633 tests, no install step
 npm run self-scan # self scan must stay clean
 ```
 

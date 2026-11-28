@@ -62,14 +62,21 @@ for an owner such as `example-org` or a repository prefix such as
 `example-org/example-action`; pinning to a commit SHA remains the stronger
 default.
 
-During a directory scan the rule also reads `.github/workflows/actions.lock`
-when it is present. For lockfile schema `v0.0.3`, the scanner validates the
+During a directory scan the rule reads `.github/workflows/actions.lock` only
+when `trustedActionsLockEnforcement` is explicitly true. Repository contents
+alone do not prove that the host enforces locked workflow dependencies, so the
+default policy never suppresses a warning through that file. When the policy is
+enabled for lockfile schema `v0.0.3`, the scanner validates the
 supported schema before trusting it: only the documented sections and fields,
 no duplicate canonical keys or repeated sections, required `ref`, `commit`,
 `owner_id` and `repo_id` fields with the correct types, valid dependency pins,
 consistent ref and commit metadata, complete workflow and uses-graph
-references, and no uses cycles. The complete YAML `uses:` scalar is decoded
-before comparison, so quoted values cannot hide a different dependency.
+references, and no uses cycles. Scalar typing follows the YAML core schema, so
+booleans, floats, integers and nulls cannot masquerade as strings. Graph
+validation is iterative and deeply nested or cyclic input is rejected without
+escaping the lock reader. The complete YAML `uses:` scalar is decoded before
+comparison, including YAML-only double-quoted escapes; a value that cannot be
+decoded safely is treated as unpinned rather than skipped.
 
 A visible tag is accepted only for an eligible `.github/workflows/*.yml` or
 `.github/workflows/*.yaml` file when that exact workflow path is onboarded,
@@ -245,8 +252,14 @@ explicit decision because the scanner cannot evaluate build arguments.
 
 A final literal `FROM scratch` stage is treated as artifact-only only when its
 exact stage alias is listed in `trustedArtifactOnlyScratchStages`, it contains
-a cross-stage `COPY`, and every instruction is limited to file transfer or
-non-runtime metadata. `ENTRYPOINT`, `CMD`, `RUN`, `HEALTHCHECK`, `ONBUILD`,
+a cross-stage `COPY` verified to come from an earlier build stage in the same
+Dockerfile, and every instruction is limited to file transfer or non-runtime
+metadata. Copies from external images, missing contexts, the same stage, malformed
+flags, or text that merely resembles a `--from` option do not count. Dockerfile
+logical instructions are joined with the active parser escape character before
+any trust decision, so a continuation cannot hide a digest or a runtime
+instruction; invalid parser directives disable the exemption. `ENTRYPOINT`,
+`CMD`, `RUN`, `HEALTHCHECK`, `ONBUILD`,
 `SHELL`, and other runtime-oriented instructions keep the finding. A normally
 named final stage never receives the literal-scratch shortcut. The artifact
 suppression never applies to `container/explicit-root-user`.

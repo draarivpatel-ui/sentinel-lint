@@ -70,6 +70,11 @@
       },
       "default": []
     },
+    "trustedActionsLockEnforcement": {
+      "description": "Explicitly trust .github/workflows/actions.lock only when the repository host is known to enforce locked workflow dependencies. Keep false unless that external enforcement has been verified.",
+      "type": "boolean",
+      "default": false
+    },
     "maxFileSize": {
       "description": "Files larger than this many bytes are skipped.",
       "type": "integer",
