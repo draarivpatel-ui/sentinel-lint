@@ -318,6 +318,7 @@ export async function loadConfig(options = {}) {
       config.trustedActionsLockEnforcement = false;
       warnings.push('"trustedActionsLockEnforcement" ignored because the config file location could not be resolved; use a config file outside the scan root or pass the policy through the scan API');
     } else if (
+      pathInside(root, configPath) ||
       pathInside(provenance.realRoot, configPath) ||
       pathInside(provenance.realRoot, provenance.location) ||
       pathInside(provenance.realRoot, provenance.target)

@@ -457,11 +457,24 @@ test('actions/unpinned-action warns instead of skipping an undecodable uses scal
 });
 
 test('parseActionsLock rejects malformed double quoted lockfile scalars', () => {
-  const interiorQuote = actionsLock().replace("    ref: 'v1.0.0'", '    ref: "v1"oops"');
+  const interiorKey = 'example-org/example-action@v1"oops';
+  const interiorQuote = actionsLockWithDependencyKey(`'${interiorKey}'`, '"v1"oops"');
   assert.equal(parseActionsLock(interiorQuote).valid, false);
 
-  const rawControl = actionsLock().replace("    ref: 'v1.0.0'", '    ref: "v1\u0001"');
+  const validInteriorQuote = actionsLockWithDependencyKey(`'${interiorKey}'`, '"v1\\"oops"');
+  const parsedInterior = parseActionsLock(validInteriorQuote);
+  assert.equal(parsedInterior.valid, true);
+  assert.equal(parsedInterior.dependencies.get(interiorKey).ref, 'v1"oops');
+
+  const controlChar = String.fromCodePoint(0x81);
+  const controlYamlKey = '"example-org/example-action@v1\\u0081"';
+  const rawControl = actionsLockWithDependencyKey(controlYamlKey, '"v1\u0081"');
   assert.equal(parseActionsLock(rawControl).valid, false);
+
+  const validControl = actionsLockWithDependencyKey(controlYamlKey, '"v1\\u0081"');
+  const parsedControl = parseActionsLock(validControl);
+  assert.equal(parsedControl.valid, true);
+  assert.equal(parsedControl.dependencies.get(`example-org/example-action@v1${controlChar}`).ref, `v1${controlChar}`);
 });
 
 test('parseActionsLock rejects noncharacters in quoted lockfile scalars', () => {
@@ -473,6 +486,11 @@ test('parseActionsLock rejects noncharacters in quoted lockfile scalars', () => 
       const lock = actionsLockWithDependencyKey(yamlKey, refScalar);
       assert.equal(parseActionsLock(lock).valid, false, `${hex} in a ${quote} quoted scalar`);
     }
+
+    const escapedControl = actionsLockWithDependencyKey(yamlKey, `"v1\\u${hex}"`);
+    const parsed = parseActionsLock(escapedControl);
+    assert.equal(parsed.valid, true, `escaped ${hex} control`);
+    assert.equal(parsed.dependencies.get(`example-org/example-action@v1${raw}`).ref, `v1${raw}`);
   }
 });
 

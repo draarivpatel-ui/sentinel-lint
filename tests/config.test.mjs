@@ -334,6 +334,33 @@ test('loadConfig rejects a config entry inside an aliased scan root that points 
   assert.match(result.warnings[0] ?? '', /inside the scan root/);
 });
 
+test('loadConfig rejects an aliased root config path through an outbound directory symlink', async (t) => {
+  const root = await makeTempDir(t);
+  const external = await makeTree(t, {
+    'policy.json': '{"trustedActionsLockEnforcement": true}\n',
+  });
+  if (!await makeSymlink(t, external, path.join(root, 'outbound'), 'dir')) return;
+  const outside = await makeTempDir(t);
+  const alias = path.join(outside, 'repo-alias');
+  if (!await makeSymlink(t, root, alias, 'dir')) return;
+
+  const throughAlias = await loadConfig({
+    root: alias,
+    cwd: outside,
+    configPath: path.join(alias, 'outbound', 'policy.json'),
+  });
+  assert.equal(throughAlias.config.trustedActionsLockEnforcement, false);
+  assert.match(throughAlias.warnings[0] ?? '', /inside the scan root/);
+
+  const directOutside = await loadConfig({
+    root: alias,
+    cwd: outside,
+    configPath: path.join(external, 'policy.json'),
+  });
+  assert.equal(directOutside.config.trustedActionsLockEnforcement, true);
+  assert.deepEqual(directOutside.warnings, []);
+});
+
 test('loadConfig fails closed when policy provenance cannot be resolved', async (t) => {
   const outside = await makeTree(t, {
     'policy.json': '{"trustedActionsLockEnforcement": true}\n',
