@@ -32,8 +32,15 @@ export function isComposeFile(file) {
   return name.includes('compose') && (name.endsWith('.yml') || name.endsWith('.yaml'));
 }
 
+function isDockerWhitespace(char) {
+  return /^[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]$/u.test(char);
+}
+
 function stripLeadingDockerWhitespace(line) {
-  return String(line).replace(/^[\t\v\f\r ]+/u, '');
+  const text = String(line);
+  let index = 0;
+  while (index < text.length && isDockerWhitespace(text[index])) index += 1;
+  return text.slice(index);
 }
 
 function isDockerCommentLine(line) {
@@ -148,10 +155,6 @@ function parseFromInstruction(text) {
   return { image: tokens[0], alias };
 }
 
-function isDockerWhitespace(char) {
-  return /\s/u.test(char);
-}
-
 function extractDockerBuilderFlags(line, escapeToken) {
   const flags = [];
   let index = 0;
@@ -237,16 +240,10 @@ function copyFromValue(text, escapeToken) {
   return invalid ? { value: null, invalid: true } : { value, invalid: false };
 }
 
-function copySourceIsEarlierStage(source, current, stages) {
-  if (/^[0-9]+$/.test(source)) {
-    const index = Number(source);
-    return Number.isSafeInteger(index) && index >= 0 && index < current.index;
-  }
-  const normalized = source.toLowerCase();
-  for (let index = 0; index < current.index; index += 1) {
-    if (stages[index].alias === normalized) return true;
-  }
-  return false;
+function copySourceIsEarlierStage(source, current) {
+  if (!/^[0-9]+$/.test(source)) return false;
+  const index = Number(source);
+  return Number.isSafeInteger(index) && index >= 0 && index < current.index;
 }
 
 function collectStages(instructions, escapeToken = '\\') {
@@ -286,7 +283,7 @@ function collectStages(instructions, escapeToken = '\\') {
     }
     if (current !== null && instruction.instruction === 'COPY') {
       const copyFrom = copyFromValue(instruction.text, escapeToken);
-      if (copyFrom.value !== null && copySourceIsEarlierStage(copyFrom.value, current, stages)) {
+      if (copyFrom.value !== null && copySourceIsEarlierStage(copyFrom.value, current)) {
         current.hasCrossStageCopy = true;
       }
     }
@@ -314,17 +311,10 @@ function cleanUserValue(text) {
   return value.split(/\s+/)[0] ?? '';
 }
 
-function effectiveUser(stage, byAlias, seen = new Set()) {
-  if (stage.users.length > 0) {
-    const instruction = stage.users[stage.users.length - 1];
-    return { value: cleanUserValue(instruction.text), instruction, inherited: false };
-  }
-  if (stage.image === null || seen.has(stage.image)) return null;
-  const base = byAlias.get(stage.image.toLowerCase());
-  if (base === undefined) return null;
-  seen.add(stage.image);
-  const inherited = effectiveUser(base, byAlias, seen);
-  return inherited === null ? null : { ...inherited, inherited: true };
+function effectiveUser(stage) {
+  if (stage.users.length === 0) return null;
+  const instruction = stage.users[stage.users.length - 1];
+  return { value: cleanUserValue(instruction.text), instruction, inherited: false };
 }
 
 function isRootUserValue(value) {
@@ -336,12 +326,8 @@ function finalStageContext(text) {
   const collected = collectDockerInstructionResult(text);
   const stages = collectStages(collected.instructions, collected.escapeToken);
   if (stages.length === 0) return null;
-  const byAlias = new Map();
-  for (const stage of stages) {
-    if (stage.alias !== null) byAlias.set(stage.alias, stage);
-  }
   const stage = stages[stages.length - 1];
-  return { stage, user: effectiveUser(stage, byAlias), reliable: collected.reliable };
+  return { stage, user: effectiveUser(stage), reliable: collected.reliable };
 }
 
 function hasNonRootTagComponent(tag) {

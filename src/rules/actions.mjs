@@ -353,33 +353,45 @@ const YAML_DOUBLE_QUOTED_ESCAPES = new Map([
   ['P', '\u2029'],
 ]);
 
+function isInvalidYamlRawCodePoint(codePoint) {
+  if (codePoint === 0x09) return false;
+  if (codePoint < 0x20 || codePoint === 0x7f) return true;
+  if (codePoint >= 0xd800 && codePoint <= 0xdfff) return true;
+  return codePoint >= 0x80 && codePoint <= 0x9f && codePoint !== 0x85;
+}
+
 function decodeYamlDoubleQuoted(value) {
   if (value.length < 2 || value[0] !== '"' || value[value.length - 1] !== '"') return null;
+  const end = value.length - 1;
   let decoded = '';
-  for (let index = 1; index < value.length - 1; index += 1) {
-    const char = value[index];
-    if (char !== '\\') {
-      decoded += char;
+  for (let index = 1; index < end;) {
+    const rawCodePoint = value.codePointAt(index);
+    const rawChar = String.fromCodePoint(rawCodePoint);
+    if (rawChar !== '\\') {
+      if (rawChar === '"' || isInvalidYamlRawCodePoint(rawCodePoint)) return null;
+      decoded += rawChar;
+      index += rawCodePoint > 0xffff ? 2 : 1;
       continue;
     }
 
     index += 1;
-    if (index >= value.length - 1) return null;
+    if (index >= end) return null;
     const escape = value[index];
     const simple = YAML_DOUBLE_QUOTED_ESCAPES.get(escape);
     if (simple !== undefined) {
       decoded += simple;
+      index += 1;
       continue;
     }
 
     const width = escape === 'x' ? 2 : escape === 'u' ? 4 : escape === 'U' ? 8 : 0;
-    if (width === 0 || index + width >= value.length - 1) return null;
+    if (width === 0 || index + width >= end) return null;
     const digits = value.slice(index + 1, index + 1 + width);
     if (!/^[0-9a-fA-F]+$/.test(digits)) return null;
     const codePoint = Number.parseInt(digits, 16);
     if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return null;
     decoded += String.fromCodePoint(codePoint);
-    index += width;
+    index += width + 1;
   }
   return decoded;
 }

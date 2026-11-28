@@ -61,7 +61,7 @@
       "default": []
     },
     "trustedArtifactOnlyScratchStages": {
-      "description": "Exact Dockerfile stage names explicitly trusted as artifact-only final scratch exports. The stage must still contain only file-transfer or metadata instructions and at least one cross-stage COPY.",
+      "description": "Exact Dockerfile stage names explicitly trusted as artifact-only final scratch exports. The stage must still contain only file-transfer or metadata instructions and at least one cross-stage COPY proven through a numeric earlier-stage index.",
       "type": "array",
       "items": {
         "type": "string",
@@ -71,7 +71,7 @@
       "default": []
     },
     "trustedActionsLockEnforcement": {
-      "description": "Explicitly trust .github/workflows/actions.lock only when the repository host is known to enforce locked workflow dependencies. Keep false unless that external enforcement has been verified.",
+      "description": "Operator policy for trusting .github/workflows/actions.lock when the repository host is known to enforce locked workflow dependencies. A true value in a config file inside the scan root is ignored with a warning; use a config file outside the scan root or the scan API. Keep false unless that external enforcement has been verified.",
       "type": "boolean",
       "default": false
     },

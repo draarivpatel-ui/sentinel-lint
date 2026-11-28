@@ -65,7 +65,10 @@ default.
 During a directory scan the rule reads `.github/workflows/actions.lock` only
 when `trustedActionsLockEnforcement` is explicitly true. Repository contents
 alone do not prove that the host enforces locked workflow dependencies, so the
-default policy never suppresses a warning through that file. When the policy is
+default policy never suppresses a warning through that file. This is operator
+policy: a true value in a config file inside the scan root is ignored with a
+warning, while an explicit config file outside the scan root or a direct scan
+API caller can assert that verified host enforcement. When the policy is
 enabled for lockfile schema `v0.0.3`, the scanner validates the
 supported schema before trusting it: only the documented sections and fields,
 no duplicate canonical keys or repeated sections, required `ref`, `commit`,
@@ -75,8 +78,10 @@ references, and no uses cycles. Scalar typing follows the YAML core schema, so
 booleans, floats, integers and nulls cannot masquerade as strings. Graph
 validation is iterative and deeply nested or cyclic input is rejected without
 escaping the lock reader. The complete YAML `uses:` scalar is decoded before
-comparison, including YAML-only double-quoted escapes; a value that cannot be
-decoded safely is treated as unpinned rather than skipped.
+comparison, including YAML-only double-quoted escapes. Unescaped interior
+quotes and raw non-printable characters make a double-quoted scalar invalid,
+and a value that cannot be decoded safely is treated as unpinned rather than
+skipped.
 
 A visible tag is accepted only for an eligible `.github/workflows/*.yml` or
 `.github/workflows/*.yaml` file when that exact workflow path is onboarded,
@@ -245,20 +250,28 @@ Protective warnings that tell the reader never to run the command are ignored.
 - OWASP: A05:2021-Security Misconfiguration
 - Files: `Dockerfile`, `Dockerfile.*` and `*.dockerfile`
 
-Flags a final image stage with no effective `USER` instruction. Multistage
-builds are resolved through named stages, so a final `FROM base` inherits a
-`USER` set in `base`. A variable such as `USER ${APP_USER}` counts as an
-explicit decision because the scanner cannot evaluate build arguments.
+Flags a final image stage with no effective `USER` instruction. A variable such
+as `USER ${APP_USER}` counts as an explicit decision because the scanner cannot
+evaluate build arguments. A final `FROM base` does not inherit `USER` evidence
+through a named stage reference: Docker named build contexts can override stage
+names, and the build command is outside the scanned content. Only an explicit
+`USER` in the final stage, or a trusted external non-root image contract, is
+proof for this rule.
 
 A final literal `FROM scratch` stage is treated as artifact-only only when its
 exact stage alias is listed in `trustedArtifactOnlyScratchStages`, it contains
-a cross-stage `COPY` verified to come from an earlier build stage in the same
-Dockerfile, and every instruction is limited to file transfer or non-runtime
-metadata. Copies from external images, missing contexts, the same stage, malformed
+a cross-stage `COPY` proven through a numeric index of an earlier build stage
+in the same Dockerfile, and every instruction is limited to file transfer or
+non-runtime metadata. Numeric indexes cannot be shadowed by named build
+contexts. Named copy sources are conservatively treated as external because a
+named build context can override a stage alias. Copies from external images,
+missing contexts, the same stage, malformed
 flags, or text that merely resembles a `--from` option do not count. Dockerfile
 logical instructions are joined with the active parser escape character before
 any trust decision, so a continuation cannot hide a digest or a runtime
-instruction; invalid parser directives disable the exemption. `ENTRYPOINT`,
+instruction. Continuation comments and blank lines are recognized with the
+same Unicode whitespace rules as BuildKit; invalid parser directives disable
+the exemption. `ENTRYPOINT`,
 `CMD`, `RUN`, `HEALTHCHECK`, `ONBUILD`,
 `SHELL`, and other runtime-oriented instructions keep the finding. A normally
 named final stage never receives the literal-scratch shortcut. The artifact

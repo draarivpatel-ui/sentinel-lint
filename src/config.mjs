@@ -142,6 +142,11 @@ function validatePositiveInteger(value, key, fallback) {
   return value;
 }
 
+function pathInside(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
 /**
  * Validate a parsed configuration object and merge it with defaults.
  * @param {unknown} raw
@@ -286,6 +291,10 @@ export async function loadConfig(options = {}) {
   }
 
   const { config, warnings } = validateConfig(raw);
+  if (config.trustedActionsLockEnforcement === true && pathInside(root, configPath)) {
+    config.trustedActionsLockEnforcement = false;
+    warnings.push('"trustedActionsLockEnforcement" ignored because the config file is inside the scan root; use a config file outside the scan root or pass the policy through the scan API');
+  }
 
   return {
     config,

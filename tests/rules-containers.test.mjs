@@ -114,7 +114,7 @@ test('container/missing-non-root-user flags a final stage without USER', async (
   assert.equal(found[0].line, 4);
 });
 
-test('container/missing-non-root-user ignores an explicitly trusted artifact-only scratch export', async (t) => {
+test('container/missing-non-root-user does not trust a named COPY source as proof of an artifact-only export', async (t) => {
   const result = await scanTree(
     t,
     { Dockerfile: `${[
@@ -126,7 +126,7 @@ test('container/missing-non-root-user ignores an explicitly trusted artifact-onl
     ].join('\n')}\n` },
     { config: { trustedArtifactOnlyScratchStages: ['artifacts'] } },
   );
-  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 
 test('container/missing-non-root-user still flags a runnable scratch image with an entrypoint', async (t) => {
@@ -330,20 +330,21 @@ test('container/missing-non-root-user does not trust a configured nonroot tag wh
   assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 
-test('container root rules inherit USER from an earlier named stage', async (t) => {
+test('container root rules do not inherit USER through a named stage reference', async (t) => {
   const result = await dockerScan(
     t,
     'FROM example/runtime:1.0.0 AS base\nUSER app\nFROM base\nCOPY app /app\n',
   );
-  assert.equal(byRule(result, 'container/missing-non-root-user').length, 0);
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 
-test('container root rules inherit an explicit root USER from a named stage', async (t) => {
+test('container root rules do not treat a root USER in a named stage as final stage evidence', async (t) => {
   const result = await dockerScan(
     t,
     'FROM example/runtime:1.0.0 AS base\nUSER root\nFROM base\nCOPY app /app\n',
   );
-  assert.equal(byRule(result, 'container/explicit-root-user').length, 1);
+  assert.equal(byRule(result, 'container/explicit-root-user').length, 0);
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });
 
 test('container/missing-non-root-user accepts a variable user because it is explicit', async (t) => {
@@ -629,6 +630,26 @@ test('container/missing-non-root-user sees a digest hidden behind a backslash co
   const result = await dockerScan(
     t,
     `FROM gcr.io/distroless/static-debian13:nonroot\\\n@${digest}\nCOPY server /server\nENTRYPOINT ["/server"]\n`,
+  );
+  assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
+});
+
+test('collectDockerInstructions skips BuildKit Unicode whitespace comments and blank continuation lines', () => {
+  const unicodeSpace = '\u2003';
+  const digest = 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const instructions = collectDockerInstructions(
+    `FROM example/base:nonroot\\\n${unicodeSpace}# comment\n${unicodeSpace}\n@${digest}\n`,
+  );
+  assert.equal(instructions.length, 1);
+  assert.equal(instructions[0].text, `example/base:nonroot@${digest}`);
+});
+
+test('container/missing-non-root-user sees a digest behind Unicode whitespace continuation lines', async (t) => {
+  const unicodeSpace = '\u2003';
+  const digest = 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const result = await dockerScan(
+    t,
+    `FROM gcr.io/distroless/static-debian13:nonroot\\\n${unicodeSpace}# comment\n${unicodeSpace}\n@${digest}\nCOPY server /server\nENTRYPOINT ["/server"]\n`,
   );
   assert.equal(byRule(result, 'container/missing-non-root-user').length, 1);
 });

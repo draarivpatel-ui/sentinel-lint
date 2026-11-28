@@ -253,3 +253,33 @@ test('validateConfig rejects a non-boolean actions lock enforcement policy', () 
   assert.throws(() => validateConfig({ trustedActionsLockEnforcement: 'true' }), ConfigError);
   assert.throws(() => validateConfig({ trustedActionsLockEnforcement: 1 }), ConfigError);
 });
+
+test('loadConfig ignores lock enforcement asserted inside the scan root', async (t) => {
+  const root = await makeTree(t, {
+    [CONFIG_FILE]: '{"trustedActionsLockEnforcement": true}\n',
+  });
+  const result = await loadConfig({ root, cwd: root });
+  assert.equal(result.config.trustedActionsLockEnforcement, false);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /inside the scan root/);
+});
+
+test('loadConfig honors lock enforcement from an explicit config outside the scan root', async (t) => {
+  const root = await makeTempDir(t);
+  const outside = await makeTempDir(t);
+  const policy = path.join(outside, 'policy.json');
+  await writeFile(policy, '{"trustedActionsLockEnforcement": true}\n', 'utf8');
+  const result = await loadConfig({ root, cwd: root, configPath: policy });
+  assert.equal(result.config.trustedActionsLockEnforcement, true);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('loadConfig honors lock enforcement from an operator cwd config outside the scan root', async (t) => {
+  const root = await makeTempDir(t);
+  const outside = await makeTree(t, {
+    [CONFIG_FILE]: '{"trustedActionsLockEnforcement": true}\n',
+  });
+  const result = await loadConfig({ root, cwd: outside });
+  assert.equal(result.config.trustedActionsLockEnforcement, true);
+  assert.deepEqual(result.warnings, []);
+});

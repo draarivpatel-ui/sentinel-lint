@@ -205,7 +205,7 @@ test('actions/unpinned-action preserves ref casing when comparing actions.lock k
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@V1.0.0']),
     '.github/workflows/actions.lock': actionsLock(),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -213,7 +213,7 @@ test('actions/unpinned-action still fires when the lockfile omits the dependency
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': actionsLock({ key: 'example-org/other-action@v1.0.0' }),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -221,7 +221,7 @@ test('actions/unpinned-action still fires when the lockfile commit is invalid', 
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': actionsLock({ commit: 'sha1-not-a-commit' }),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -232,7 +232,7 @@ test('actions/unpinned-action ignores a missing or unsupported lockfile schema v
     const result = await scanTree(t, {
       ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
       '.github/workflows/actions.lock': lockfile,
-    });
+    }, { config: { trustedActionsLockEnforcement: true } });
     assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
   }
 });
@@ -241,7 +241,7 @@ test('actions/unpinned-action ignores a lockfile entry for another workflow', as
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': actionsLock({ workflowPath: '.github/workflows/release.yml' }),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -249,7 +249,7 @@ test('actions/unpinned-action does not canonicalize action path casing in action
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/repo/Actions/deploy@v1']),
     '.github/workflows/actions.lock': actionsLock({ key: 'example-org/repo/actions/deploy@v1', ref: 'v1' }),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -276,7 +276,7 @@ test('actions/unpinned-action rejects lockfile ref metadata that disagrees with 
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': actionsLock({ ref: 'v1.0.1' }),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -288,7 +288,7 @@ test('actions/unpinned-action rejects duplicate canonical dependency keys in act
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': duplicate,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -297,7 +297,7 @@ test('actions/unpinned-action rejects repeated lockfile sections', async (t) => 
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': repeated,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -306,7 +306,7 @@ test('actions/unpinned-action rejects unexpected nesting around lockfile commit 
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': nested,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -315,7 +315,7 @@ test('actions/unpinned-action rejects invalid lockfile field types', async (t) =
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': wrongType,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -327,7 +327,7 @@ test('actions/unpinned-action rejects a lockfile uses graph entry missing its de
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': missingGraphTarget,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -343,7 +343,7 @@ test('actions/unpinned-action never uses actions.lock to suppress composite acti
   const result = await scanTree(t, {
     'action.yml': 'runs:\n  using: composite\n  steps:\n    - uses: example-org/example-action@v1.0.0\n',
     '.github/workflows/actions.lock': actionsLock({ workflowPath: 'action.yml' }),
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -352,14 +352,14 @@ test('actions/unpinned-action rejects unexpected lockfile sections and dependenc
   const sectionResult = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': unexpectedSection,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(sectionResult, 'actions/unpinned-action').length, 1);
 
   const unexpectedField = actionsLock().replace('    owner_id: 1\n', '    owner_id: 1\n    verifier: trusted\n');
   const fieldResult = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': unexpectedField,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(fieldResult, 'actions/unpinned-action').length, 1);
 });
 
@@ -383,7 +383,7 @@ test('actions/unpinned-action rejects a full SHA lockfile key whose commit diges
   const result = await scanTree(t, {
     ...workflow(['jobs:', '  b:', '    steps:', '      - uses: example-org/example-action@v1.0.0']),
     '.github/workflows/actions.lock': mismatched,
-  });
+  }, { config: { trustedActionsLockEnforcement: true } });
   assert.equal(byRule(result, 'actions/unpinned-action').length, 1);
 });
 
@@ -441,6 +441,22 @@ test('actions/unpinned-action warns instead of skipping an undecodable uses scal
     assert.equal(found.length, 1, value || 'empty uses');
     assert.match(found[0].message, /cannot be decoded safely/);
   }
+});
+
+test('parseActionsLock rejects malformed double quoted lockfile scalars', () => {
+  const interiorQuote = actionsLock().replace("    ref: 'v1.0.0'", '    ref: "v1"oops"');
+  assert.equal(parseActionsLock(interiorQuote).valid, false);
+
+  const rawControl = actionsLock().replace("    ref: 'v1.0.0'", '    ref: "v1\u0001"');
+  assert.equal(parseActionsLock(rawControl).valid, false);
+});
+
+test('parseActionsLock still accepts valid double quoted lockfile escapes', () => {
+  const key = 'example-org/example-action@v1.00';
+  const lock = actionsLock({ key, ref: 'v1.00' }).replace("    ref: 'v1.00'", '    ref: "v1.\\x30\\x30"');
+  const parsed = parseActionsLock(lock);
+  assert.equal(parsed.valid, true);
+  assert.equal(parsed.dependencies.get(key).ref, 'v1.00');
 });
 
 test('parseActionsLock validates a deep uses graph iteratively', () => {
