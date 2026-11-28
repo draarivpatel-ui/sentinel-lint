@@ -31,6 +31,19 @@ function actionsLock({
   ].join('\n');
 }
 
+function actionsLockWithDependencyKey(yamlKey, refScalar) {
+  return [
+    "version: 'v0.0.3'",
+    'dependencies:',
+    `  ${yamlKey}:`,
+    `    ref: ${refScalar}`,
+    `    commit: 'sha1-${PINNED}'`,
+    '    owner_id: 1',
+    '    repo_id: 2',
+    '',
+  ].join('\n');
+}
+
 test('actions/script-injection flags a pull request title in run:', async (t) => {
   const result = await scanTree(
     t,
@@ -449,6 +462,30 @@ test('parseActionsLock rejects malformed double quoted lockfile scalars', () => 
 
   const rawControl = actionsLock().replace("    ref: 'v1.0.0'", '    ref: "v1\u0001"');
   assert.equal(parseActionsLock(rawControl).valid, false);
+});
+
+test('parseActionsLock rejects noncharacters in quoted lockfile scalars', () => {
+  for (const [codePoint, hex] of [[0xfffe, 'FFFE'], [0xffff, 'FFFF']]) {
+    const raw = String.fromCodePoint(codePoint);
+    const yamlKey = `"example-org/example-action@v1\\u${hex}"`;
+    for (const quote of ["'", '"']) {
+      const refScalar = `${quote}v1${raw}${quote}`;
+      const lock = actionsLockWithDependencyKey(yamlKey, refScalar);
+      assert.equal(parseActionsLock(lock).valid, false, `${hex} in a ${quote} quoted scalar`);
+    }
+  }
+});
+
+test('parseActionsLock rejects lone interior quotes in single quoted lockfile scalars', () => {
+  const key = "example-org/example-action@v1'oops";
+  const yamlKey = `"${key}"`;
+  const malformed = actionsLockWithDependencyKey(yamlKey, "'v1'oops'");
+  assert.equal(parseActionsLock(malformed).valid, false);
+
+  const valid = actionsLockWithDependencyKey(yamlKey, "'v1''oops'");
+  const parsed = parseActionsLock(valid);
+  assert.equal(parsed.valid, true);
+  assert.equal(parsed.dependencies.get(key).ref, "v1'oops");
 });
 
 test('parseActionsLock still accepts valid double quoted lockfile escapes', () => {

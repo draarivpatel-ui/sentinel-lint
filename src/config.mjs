@@ -6,7 +6,7 @@
  * keep hand written configs pleasant.
  */
 
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { assertValidGlob } from './globs.mjs';
 import { isValidImageRepositoryPrefix } from './image-ref.mjs';
@@ -147,6 +147,27 @@ function pathInside(root, candidate) {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+function canonicalRealpath(candidate) {
+  const realpath = realpathSync.native ?? realpathSync;
+  return realpath(candidate);
+}
+
+function canonicalLocation(candidate) {
+  return path.join(canonicalRealpath(path.dirname(candidate)), path.basename(candidate));
+}
+
+function policyProvenance(root, configPath) {
+  try {
+    return {
+      realRoot: canonicalRealpath(root),
+      location: canonicalLocation(configPath),
+      target: canonicalRealpath(configPath),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Validate a parsed configuration object and merge it with defaults.
  * @param {unknown} raw
@@ -226,7 +247,7 @@ export function validateConfig(raw) {
  * @returns {Promise<{config: object, path: string|null, configDir: string, warnings: string[]}>}
  */
 export async function loadConfig(options = {}) {
-  const cwd = options.cwd ?? process.cwd();
+  const cwd = path.resolve(options.cwd ?? process.cwd());
   const root = path.resolve(options.root ?? cwd);
   let configPath = null;
 
@@ -273,9 +294,10 @@ export async function loadConfig(options = {}) {
     };
   }
 
+  const provenance = policyProvenance(root, configPath);
   let text;
   try {
-    text = await fs.readFile(configPath, 'utf8');
+    text = await fs.readFile(provenance === null ? configPath : provenance.target, 'utf8');
   } catch (error) {
     throw new ConfigError(`could not read config file ${path.basename(configPath)}: ${error.code ?? error.message}`);
   }
@@ -291,9 +313,18 @@ export async function loadConfig(options = {}) {
   }
 
   const { config, warnings } = validateConfig(raw);
-  if (config.trustedActionsLockEnforcement === true && pathInside(root, configPath)) {
-    config.trustedActionsLockEnforcement = false;
-    warnings.push('"trustedActionsLockEnforcement" ignored because the config file is inside the scan root; use a config file outside the scan root or pass the policy through the scan API');
+  if (config.trustedActionsLockEnforcement === true) {
+    if (provenance === null) {
+      config.trustedActionsLockEnforcement = false;
+      warnings.push('"trustedActionsLockEnforcement" ignored because the config file location could not be resolved; use a config file outside the scan root or pass the policy through the scan API');
+    } else if (
+      pathInside(provenance.realRoot, configPath) ||
+      pathInside(provenance.realRoot, provenance.location) ||
+      pathInside(provenance.realRoot, provenance.target)
+    ) {
+      config.trustedActionsLockEnforcement = false;
+      warnings.push('"trustedActionsLockEnforcement" ignored because the config file is inside the scan root; use a config file outside the scan root or pass the policy through the scan API');
+    }
   }
 
   return {

@@ -5,7 +5,7 @@
 A plugin-first, zero-dependency security policy linter for repositories, GitHub
 Actions workflows, MCP configurations, AI agent instruction files and container
 builds. It ships **28 security rules**, a stable rule API, three reporters
-(terminal, JSON and SARIF 2.1.0) and **633 tests** that run on the Node.js
+(terminal, JSON and SARIF 2.1.0) and **646 tests** that run on the Node.js
 built in test runner without installing a single package.
 
 ```
@@ -224,10 +224,11 @@ component. Tag inference never applies when a digest selects the image.
 prove from repository contents that the hosting platform enforces
 `.github/workflows/actions.lock`. It is operator policy, not repository policy:
 when a config file inside the scan root sets it true, the scanner ignores that
-value and emits a warning. Enable it only through a config file outside the
-scan root, or through a direct scan API caller that has verified the external
-enforcement. Otherwise a valid lockfile never suppresses an unpinned-action
-warning. `trustedArtifactOnlyScratchStages` is the explicit opt in for final scratch
+value and emits a warning. Symlinks are resolved before making that decision,
+and enforcement stays off if the scanner cannot resolve the config location.
+Enable it only through a config file outside the scan root, or through a direct
+scan API caller that has verified the external enforcement. Otherwise a valid
+lockfile never suppresses an unpinned-action warning. `trustedArtifactOnlyScratchStages` is the explicit opt in for final scratch
 stages that are only artifact exports; it names exact stage aliases and still
 requires file-transfer-only content with a cross-stage copy proven through a
 numeric stage index. Named stage references are not proof because a Docker
@@ -305,7 +306,7 @@ false negatives through [SECURITY.md](SECURITY.md).
 ## Development
 
 ```bash
-npm test          # 633 tests, no install step
+npm test          # 646 tests, no install step
 npm run self-scan # self scan
 npm ci            # only needed before fuzzing in a fresh checkout
 npm run test:fuzz # fast-check property tests

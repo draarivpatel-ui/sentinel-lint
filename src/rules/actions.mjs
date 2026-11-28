@@ -357,6 +357,7 @@ function isInvalidYamlRawCodePoint(codePoint) {
   if (codePoint === 0x09) return false;
   if (codePoint < 0x20 || codePoint === 0x7f) return true;
   if (codePoint >= 0xd800 && codePoint <= 0xdfff) return true;
+  if (codePoint === 0xfffe || codePoint === 0xffff) return true;
   return codePoint >= 0x80 && codePoint <= 0x9f && codePoint !== 0x85;
 }
 
@@ -396,10 +397,30 @@ function decodeYamlDoubleQuoted(value) {
   return decoded;
 }
 
+function decodeYamlSingleQuoted(value) {
+  if (value.length < 2 || value[0] !== "'" || value[value.length - 1] !== "'") return null;
+  const end = value.length - 1;
+  let decoded = '';
+  for (let index = 1; index < end;) {
+    const rawCodePoint = value.codePointAt(index);
+    const rawChar = String.fromCodePoint(rawCodePoint);
+    if (rawChar === "'") {
+      if (index + 1 >= end || value[index + 1] !== "'") return null;
+      decoded += "'";
+      index += 2;
+      continue;
+    }
+    if (isInvalidYamlRawCodePoint(rawCodePoint)) return null;
+    decoded += rawChar;
+    index += rawCodePoint > 0xffff ? 2 : 1;
+  }
+  return decoded;
+}
+
 function yamlScalar(raw) {
   const value = stripYamlComment(String(raw)).trim();
   if (value.length >= 2 && value[0] === "'" && value[value.length - 1] === "'") {
-    return value.slice(1, -1).replace(/''/g, "'");
+    return decodeYamlSingleQuoted(value);
   }
   if (value.length >= 2 && value[0] === '"' && value[value.length - 1] === '"') {
     return decodeYamlDoubleQuoted(value);
