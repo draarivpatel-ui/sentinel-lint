@@ -11,9 +11,9 @@ import {
 } from '../src/config.mjs';
 import { makeTempDir, makeTree } from './helpers.mjs';
 
-async function makeSymlink(t, target, link) {
+async function makeSymlink(t, target, link, type = null) {
   try {
-    await symlink(target, link);
+    await symlink(target, link, type);
     return true;
   } catch (error) {
     if (process.platform === 'win32' && (error.code === 'EPERM' || error.code === 'EACCES')) {
@@ -303,7 +303,7 @@ test('loadConfig ignores lock enforcement through an external symlink into the s
   });
   const outside = await makeTempDir(t);
   const link = path.join(outside, 'policy-link.json');
-  if (!await makeSymlink(t, path.join(root, 'policy.json'), link)) return;
+  if (!await makeSymlink(t, path.join(root, 'policy.json'), link, 'file')) return;
   const result = await loadConfig({ root, cwd: outside, configPath: link });
   assert.equal(result.config.trustedActionsLockEnforcement, false);
   assert.match(result.warnings[0] ?? '', /inside the scan root/);
@@ -315,7 +315,7 @@ test('loadConfig compares an aliased scan root with the real config target', asy
   });
   const outside = await makeTempDir(t);
   const alias = path.join(outside, 'repo-alias');
-  if (!await makeSymlink(t, root, alias)) return;
+  if (!await makeSymlink(t, root, alias, 'dir')) return;
   const result = await loadConfig({ root: alias, cwd: outside, configPath: path.join(root, 'policy.json') });
   assert.equal(result.config.trustedActionsLockEnforcement, false);
   assert.match(result.warnings[0] ?? '', /inside the scan root/);
@@ -326,9 +326,9 @@ test('loadConfig rejects a config entry inside an aliased scan root that points 
   const outside = await makeTree(t, {
     'policy.json': '{"trustedActionsLockEnforcement": true}\n',
   });
-  if (!await makeSymlink(t, path.join(outside, 'policy.json'), path.join(root, 'policy-link.json'))) return;
+  if (!await makeSymlink(t, path.join(outside, 'policy.json'), path.join(root, 'policy-link.json'), 'file')) return;
   const alias = path.join(outside, 'repo-alias');
-  if (!await makeSymlink(t, root, alias)) return;
+  if (!await makeSymlink(t, root, alias, 'dir')) return;
   const result = await loadConfig({ root: alias, cwd: outside, configPath: path.join(root, 'policy-link.json') });
   assert.equal(result.config.trustedActionsLockEnforcement, false);
   assert.match(result.warnings[0] ?? '', /inside the scan root/);
@@ -340,8 +340,8 @@ test('loadConfig fails closed when policy provenance cannot be resolved', async 
   });
   const loopA = path.join(outside, 'root-loop-a');
   const loopB = path.join(outside, 'root-loop-b');
-  if (!await makeSymlink(t, loopB, loopA)) return;
-  if (!await makeSymlink(t, loopA, loopB)) return;
+  if (!await makeSymlink(t, loopB, loopA, 'dir')) return;
+  if (!await makeSymlink(t, loopA, loopB, 'dir')) return;
   const result = await loadConfig({ root: loopA, cwd: outside, configPath: path.join(outside, 'policy.json') });
   assert.equal(result.config.trustedActionsLockEnforcement, false);
   assert.match(result.warnings[0] ?? '', /could not be resolved/);
